@@ -45,6 +45,34 @@ class Parser:
         TokenType.INLINE, TokenType.NORETURN,
     }
 
+    # DOS-era non-standard specifiers (MS-C, Borland, Watcom). Accepted and
+    # ignored so period headers parse; in flat-32 targets they are no-ops.
+    # See uc386 README Phase 1 for scope rationale.
+    _DOS_IGNORED_IDENTS = frozenset({
+        # 16-bit memory-model pointer qualifiers
+        'near', 'far', 'huge',
+        '_near', '_far', '_huge',
+        '__near', '__far', '__huge',
+        # Segment-register pointer qualifiers (MS-C / Borland)
+        '_cs', '_ds', '_es', '_ss', '_seg',
+        '__cs', '__ds', '__es', '__ss', '__seg',
+        # Calling conventions
+        'cdecl', 'pascal', 'stdcall', 'fastcall', 'syscall', 'watcall', 'fortran',
+        '_cdecl', '_pascal', '_stdcall', '_fastcall', '_syscall', '_watcall', '_fortran',
+        '__cdecl', '__pascal', '__stdcall', '__fastcall', '__syscall', '__watcall', '__fortran',
+        # Function attributes
+        'interrupt', '_interrupt', '__interrupt',
+        '_loadds', '__loadds',
+        '_saveregs', '__saveregs',
+        '_export', '__export',
+    })
+
+    # DOS-era specifiers that take a parenthesized argument to be skipped.
+    _DOS_PAREN_IDENTS = frozenset({
+        '_based', '__based',
+        '_Seg16', '__Seg16',
+    })
+
     def __init__(self, tokens: list[Token]):
         self.tokens = tokens
         self.pos = 0
@@ -110,6 +138,46 @@ class Parser:
                         else:
                             self._advance()
 
+    def _skip_dos_specifiers(self) -> None:
+        """Skip DOS-era non-standard specifiers (near/far/huge, __cdecl,
+        __interrupt, __based(seg), etc.).
+
+        These appear throughout MS-C, Borland, and Watcom period headers.
+        uc_core accepts and discards them; target backends that care
+        (16-bit) can reintroduce real semantics. In flat-32 (uc386) and
+        Z80 (uc80) targets they are all no-ops.
+        """
+        while self._check(TokenType.IDENTIFIER):
+            value = self._current().value
+            if value in self._DOS_IGNORED_IDENTS:
+                self._advance()
+            elif value in self._DOS_PAREN_IDENTS:
+                self._advance()
+                # Skip optional (arg) — __based(segname) usually has one.
+                if self._match(TokenType.LPAREN):
+                    depth = 1
+                    while depth > 0 and not self._check(TokenType.EOF):
+                        if self._match(TokenType.LPAREN):
+                            depth += 1
+                        elif self._match(TokenType.RPAREN):
+                            depth -= 1
+                        else:
+                            self._advance()
+            else:
+                break
+
+    def _skip_noise(self) -> None:
+        """Skip any combination of __attribute__, _Alignas, and DOS-era
+        specifiers, in any order. These can be interleaved freely at
+        declaration boundaries in real-world period code."""
+        while True:
+            before = self.pos
+            self._skip_gcc_attribute()
+            self._skip_alignas()
+            self._skip_dos_specifiers()
+            if self.pos == before:
+                break
+
     def _skip_alignas(self) -> None:
         """Skip _Alignas(...) specifier (Z80 has no alignment requirements)."""
         while self._check(TokenType.ALIGNAS):
@@ -157,8 +225,8 @@ class Parser:
 
     def _parse_type_specifier(self) -> ast.TypeNode:
         """Parse type specifier."""
-        # Skip leading __attribute__
-        self._skip_gcc_attribute()
+        # Skip leading __attribute__ / _Alignas / DOS qualifiers
+        self._skip_noise()
 
         loc = self._current().location
 
@@ -173,6 +241,8 @@ class Parser:
         base_type = None
 
         while True:
+            # Absorb DOS-era qualifiers (near/far/__cdecl/etc.) anywhere in the specifier list
+            self._skip_dos_specifiers()
             if self._match(TokenType.CONST):
                 is_const = True
             elif self._match(TokenType.VOLATILE):
@@ -284,14 +354,14 @@ class Parser:
             self._expect(TokenType.STRUCT)
 
         # Skip __attribute__ before name
-        self._skip_gcc_attribute()
+        self._skip_noise()
 
         name = None
         if self._check(TokenType.IDENTIFIER) and self._current().value not in ('__attribute__', '__attribute'):
             name = self._advance().value
 
         # Skip __attribute__ after name, before brace
-        self._skip_gcc_attribute()
+        self._skip_noise()
 
         # Parse inline member definitions if present
         members = []
@@ -311,7 +381,7 @@ class Parser:
                 self._expect(TokenType.SEMICOLON)
             self._expect(TokenType.RBRACE)
             # Skip __attribute__ after closing brace
-            self._skip_gcc_attribute()
+            self._skip_noise()
 
         return ast.StructType(name=name, is_union=is_union, members=members, location=loc)
 
@@ -342,20 +412,20 @@ class Parser:
 
     def _parse_declarator(self, base_type: ast.TypeNode) -> tuple[str, ast.TypeNode]:
         """Parse declarator, returning (name, full_type)."""
-        # Skip __attribute__ before declarator
-        self._skip_gcc_attribute()
+        # Skip __attribute__ / DOS qualifiers before declarator
+        self._skip_noise()
 
         # Handle pointers
         pointer_stack = []  # Track pointer modifiers for later
         while self._match(TokenType.STAR):
-            # Skip __attribute__ after *
-            self._skip_gcc_attribute()
+            # Skip __attribute__ / DOS qualifiers after *  (e.g. char * far p)
+            self._skip_noise()
             is_const = self._match(TokenType.CONST) is not None
             is_volatile = self._match(TokenType.VOLATILE) is not None
             # Also consume restrict - we store it but don't enforce semantics
             self._match(TokenType.RESTRICT)
-            # Skip __attribute__ after qualifiers
-            self._skip_gcc_attribute()
+            # Skip __attribute__ / DOS qualifiers after qualifiers
+            self._skip_noise()
             pointer_stack.append((is_const, is_volatile))
 
         # If no grouping, apply pointers directly to base type
@@ -364,9 +434,8 @@ class Parser:
             for is_const, is_volatile in pointer_stack:
                 base_type = ast.PointerType(base_type=base_type, is_const=is_const, is_volatile=is_volatile)
 
-        # Skip __attribute__ and _Alignas before declarator name
-        self._skip_gcc_attribute()
-        self._skip_alignas()
+        # Skip __attribute__ / _Alignas / DOS qualifiers before declarator name
+        self._skip_noise()
 
         # Handle parenthesized declarator
         if self._match(TokenType.LPAREN):
@@ -471,8 +540,8 @@ class Parser:
                     else:
                         params, is_variadic = self._parse_parameter_list()
                 self._expect(TokenType.RPAREN)
-                # Skip __attribute__ after function parameters
-                self._skip_gcc_attribute()
+                # Skip __attribute__ / DOS calling-convention qualifiers after function parameters
+                self._skip_noise()
                 # Store params for use by FunctionDecl creation
                 self._last_params = params
                 base_type = ast.FunctionType(return_type=base_type,
@@ -1222,6 +1291,8 @@ class Parser:
         pre_volatile = False
 
         while True:
+            # Absorb DOS-era storage/calling-convention qualifiers interleaved with storage class
+            self._skip_dos_specifiers()
             if self._match(TokenType.TYPEDEF):
                 is_typedef = True
             elif self._match(TokenType.EXTERN):
@@ -1264,9 +1335,8 @@ class Parser:
         if pre_volatile:
             base_type.is_volatile = True
 
-        # Skip __attribute__ and _Alignas after type specifier
-        self._skip_gcc_attribute()
-        self._skip_alignas()
+        # Skip __attribute__ / _Alignas / DOS qualifiers after type specifier
+        self._skip_noise()
 
         # C allows declaration specifiers in any order, so storage class and
         # qualifiers can appear after the type specifier (e.g. struct{...} static const x;)
