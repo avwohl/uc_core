@@ -22,13 +22,15 @@ Level 3 (-O3) adds:
 
 import copy
 from . import ast
+from .type_config import TypeConfig, Z80_CPM
 
 
 class ASTOptimizer:
-    def __init__(self, opt_level: int = 2):
+    def __init__(self, opt_level: int = 2, type_config: TypeConfig | None = None):
         self.stats: dict[str, int] = {}
         self._changed = False
         self.opt_level = opt_level
+        self.type_config = type_config if type_config is not None else Z80_CPM
         # Level 3 state (reset per function):
         self._cse_cache: dict[str, ast.Expression] = {}
         self._cse_deps: dict[str, set[str]] = {}
@@ -1487,37 +1489,31 @@ class ASTOptimizer:
         """Check if any IntLiteral is unsigned."""
         return any(isinstance(e, ast.IntLiteral) and e.is_unsigned for e in exprs)
 
-    @staticmethod
-    def _is_effectively_unsigned(lit: ast.IntLiteral) -> bool:
+    def _is_effectively_unsigned(self, lit: ast.IntLiteral) -> bool:
         """Check if a literal is effectively unsigned per C standard 6.4.4.1.
 
         For hex/octal constants without U suffix, the type is the first that fits:
         int → unsigned int → long int → unsigned long int → ...
-        So a hex constant like 0xab00 (43776) that exceeds signed int range (32767)
-        but fits unsigned int (65535) is effectively unsigned int.
         """
         if lit.is_unsigned:
             return True
         if not lit.is_hex:
             return False
-        # Hex without L suffix
+        tc = self.type_config
         if not lit.is_long:
-            # unsigned int if > INT_MAX but <= UINT_MAX
-            if lit.value > 0x7FFF and lit.value <= 0xFFFF:
+            # Exceeds signed int, fits unsigned int?
+            if lit.value > tc.int_max and lit.value <= tc.uint_max:
                 return True
-            # Value exceeds 16-bit: promoted to long per 6.4.4.1
-            # unsigned long if > LONG_MAX but <= ULONG_MAX
-            if lit.value > 0x7FFFFFFF and lit.value <= 0xFFFFFFFF:
+            if lit.value > tc.long_max and lit.value <= tc.ulong_max:
                 return True
             return False
         # Hex with L suffix: unsigned long if > LONG_MAX but <= ULONG_MAX
-        if lit.value > 0x7FFFFFFF and lit.value <= 0xFFFFFFFF:
+        if lit.value > tc.long_max and lit.value <= tc.ulong_max:
             return True
         return False
 
-    @staticmethod
-    def _literal_mask(lit: ast.IntLiteral) -> int:
-        """Get bitmask for an IntLiteral based on its type width.
+    def _literal_mask(self, lit: ast.IntLiteral) -> int:
+        """Get bitmask for an IntLiteral based on its effective type width.
 
         Per C standard 6.4.4.1, constant type is determined by value and suffix:
         - Decimal without suffix: int → long → long long
@@ -1525,28 +1521,27 @@ class ASTOptimizer:
         - U suffix: unsigned int → unsigned long → unsigned long long
         If value exceeds the range of the current type, promote to next.
         """
+        tc = self.type_config
+        int_mask = tc.uint_max
+        long_mask = tc.ulong_max
+        long_long_mask = tc.ulong_long_max
         val = lit.value
-        # Explicit L suffix
         if lit.is_long:
-            if val > 2147483647 or val < -2147483648:
-                return 0xFFFFFFFFFFFFFFFF
-            return 0xFFFFFFFF
-        # No suffix — determine type from value
-        # Hex or U suffix: values up to 0xFFFF fit in unsigned int (16-bit)
+            if val > tc.long_max or val < -(tc.long_max + 1):
+                return long_long_mask
+            return long_mask
         if lit.is_hex or lit.is_unsigned:
-            if val > 0xFFFF or val < -32768:
-                # Exceeds 16-bit range → promote to long (32-bit)
-                if val > 0xFFFFFFFF:
-                    return 0xFFFFFFFFFFFFFFFF
-                return 0xFFFFFFFF
-            return 0xFFFF
-        # Decimal: values in [-32768, 32767] fit in int (16-bit)
-        if val > 32767 or val < -32768:
-            # Exceeds 16-bit signed → promote to long (32-bit)
-            if val > 2147483647 or val < -2147483648:
-                return 0xFFFFFFFFFFFFFFFF
-            return 0xFFFFFFFF
-        return 0xFFFF
+            if val > tc.uint_max or val < -(tc.int_max + 1):
+                if val > tc.ulong_max:
+                    return long_long_mask
+                return long_mask
+            return int_mask
+        # Decimal, no suffix
+        if val > tc.int_max or val < -(tc.int_max + 1):
+            if val > tc.long_max or val < -(tc.long_max + 1):
+                return long_long_mask
+            return long_mask
+        return int_mask
 
     def _fold_constants(self, op: str, a: int, b: int, unsigned: bool,
                         mask: int = 0xFFFF) -> int | None:
@@ -1628,21 +1623,12 @@ class ASTOptimizer:
             return val - (mask + 1)
         return val
 
-    @staticmethod
-    def _sizeof_type(t: ast.TypeNode) -> int | None:
+    def _sizeof_type(self, t: ast.TypeNode) -> int | None:
         """Compute sizeof(type) at compile time. Returns None if unknown."""
         if isinstance(t, ast.BasicType):
-            name = t.name
-            if name in ('char', 'signed char', 'unsigned char', 'bool'):
-                return 1
-            if name in ('short', 'unsigned short', 'int', 'unsigned int'):
-                return 2
-            if name in ('long', 'unsigned long', 'float', 'double'):
-                return 4
-            if name in ('long long', 'unsigned long long'):
-                return 8
+            return self.type_config.sizeof_basic(t.name)
         if isinstance(t, ast.PointerType):
-            return 2
+            return self.type_config.ptr_size
         return None  # Structs, arrays — too complex for optimizer
 
     def _stat(self, name: str) -> None:
