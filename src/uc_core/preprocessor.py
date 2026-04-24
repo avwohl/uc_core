@@ -493,6 +493,17 @@ class Preprocessor:
             raise PreprocessorError("Empty condition in #if",
                                    self.current_file, self.current_line)
 
+        # Strip C/C++ comments from the condition.  Real preprocessors
+        # remove comments before tokenizing the directive, so `#if 0 // x`
+        # is just `#if 0`.  Without this, the tail trips up the Python
+        # eval (e.g. it parses `// x` as floor-division).
+        expr = re.sub(r'/\*.*?\*/', ' ', expr)
+        expr = re.sub(r'//.*$', '', expr)
+        expr = expr.strip()
+        if not expr:
+            raise PreprocessorError("Empty condition in #if",
+                                   self.current_file, self.current_line)
+
         # Handle defined() and defined NAME
         expr = self._expand_defined(expr)
 

@@ -509,6 +509,20 @@ class ASTOptimizer:
         if const is None:
             return None
 
+        # Don't strength-reduce when the other operand is float-typed: shift
+        # is undefined for floats and `x + x` would still produce a float.
+        # The latter is fine in principle, but we'd need to know the type to
+        # confirm.  Cast nodes around float values are the common case
+        # ((float)N * 16) and we conservatively bail out for any cast or
+        # float literal.
+        if isinstance(other, (ast.FloatLiteral, ast.Cast)):
+            if isinstance(other, ast.Cast):
+                t = other.target_type
+                if isinstance(t, ast.BasicType) and t.name in ("float", "double", "long double"):
+                    return None
+            else:
+                return None
+
         val = const.value
 
         # x * 0 → 0 (handled by zero elements)
