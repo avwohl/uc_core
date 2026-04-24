@@ -117,6 +117,7 @@ class TypeConfig:
             "__PTRDIFF_WIDTH__":    str(bits(self.ptr_size)),
             "__SIZE_WIDTH__":       str(bits(self.ptr_size)),
             "__CHAR_MAX__":         str(self._signed_max(self.char_size)),
+            "__SCHAR_MAX__":        str(self._signed_max(self.char_size)),
             "__SHRT_MAX__":         str(self.short_max),
             "__INT_MAX__":          str(self.int_max),
             "__LONG_MAX__":         str(self.long_max) + "L",
