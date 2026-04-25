@@ -151,6 +151,8 @@ KEYWORDS = {
     'goto': TokenType.GOTO,
     'if': TokenType.IF,
     'inline': TokenType.INLINE,
+    '__inline': TokenType.INLINE,
+    '__inline__': TokenType.INLINE,
     'int': TokenType.INT,
     'long': TokenType.LONG,
     'nullptr': TokenType.NULLPTR,

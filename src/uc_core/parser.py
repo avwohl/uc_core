@@ -1312,8 +1312,11 @@ class Parser:
         pre_volatile = False
 
         while True:
-            # Absorb DOS-era storage/calling-convention qualifiers interleaved with storage class
-            self._skip_dos_specifiers()
+            # Absorb DOS-era storage/calling-convention qualifiers and
+            # GCC __attribute__((...)) markers interleaved between
+            # storage-class keywords. Real-world period code mixes
+            # them freely.
+            self._skip_noise()
             if self._match(TokenType.TYPEDEF):
                 is_typedef = True
             elif self._match(TokenType.EXTERN):
