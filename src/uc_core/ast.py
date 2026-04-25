@@ -200,6 +200,19 @@ class SizeofType(Expression):
 
 
 @dataclass(kw_only=True)
+class VaArgExpr(Expression):
+    """`va_arg(ap, type-name)` — read the next variadic arg of the
+    given type from `ap` and advance `ap` past it.
+
+    `ap` is an arbitrary expression naming a `va_list` (typically an
+    Identifier). `target_type` is a type-name parsed via the same path
+    as `sizeof(type)` and casts. Treated as a builtin form by the
+    parser because the second operand is a type, not an expression."""
+    ap: 'Expression'
+    target_type: TypeNode
+
+
+@dataclass(kw_only=True)
 class Compound(Expression):
     """Compound literal (C99): (type){initializer}."""
     target_type: TypeNode

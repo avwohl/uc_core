@@ -922,6 +922,23 @@ class Parser:
                 self._expect(TokenType.RBRACKET)
                 expr = ast.Index(array=expr, index=index, location=loc)
             elif self._match(TokenType.LPAREN):
+                # `va_arg(ap, type-name)` — recognized as a builtin
+                # form because the second operand is a type-name, not
+                # an expression. We special-case this before the
+                # generic call parsing so `int` and friends can appear
+                # in that slot.
+                if (
+                    isinstance(expr, ast.Identifier)
+                    and expr.name == "va_arg"
+                ):
+                    ap = self._parse_assignment_expression()
+                    self._expect(TokenType.COMMA)
+                    target_type = self._parse_type_name()
+                    self._expect(TokenType.RPAREN)
+                    expr = ast.VaArgExpr(
+                        ap=ap, target_type=target_type, location=loc,
+                    )
+                    continue
                 # Function call
                 args = []
                 if not self._check(TokenType.RPAREN):
