@@ -1409,24 +1409,40 @@ class Parser:
                 return ast.StructDecl(name=base_type.name, members=base_type.members,
                                       is_union=base_type.is_union, is_definition=True, location=loc)
             elif is_typedef:
-                # typedef struct { ... } Name;
-                name, _ = self._parse_declarator(base_type)
-                if name:
-                    self.typedefs[name] = base_type
-                    self._expect(TokenType.SEMICOLON)
-                    return ast.TypedefDecl(name=name, target_type=base_type, location=loc)
+                # typedef struct { ... } Name [, *Ptr, Other...] ;
+                first_name = None
+                while True:
+                    name, full_type = self._parse_declarator(base_type)
+                    if not name:
+                        break
+                    self.typedefs[name] = full_type
+                    if first_name is None:
+                        first_name = name
+                    if self._match(TokenType.COMMA):
+                        continue
+                    break
+                self._expect(TokenType.SEMICOLON)
+                return ast.TypedefDecl(name=first_name, target_type=base_type, location=loc)
         if isinstance(base_type, ast.EnumType) and base_type.values:
             if self._check(TokenType.SEMICOLON):
                 # Bare enum definition: enum Color { ... };
                 self._advance()  # consume semicolon
                 return ast.EnumDecl(name=base_type.name, values=base_type.values, is_definition=True, location=loc)
             elif is_typedef:
-                # typedef enum { ... } Name;
-                name, _ = self._parse_declarator(base_type)
-                if name:
-                    self.typedefs[name] = base_type
-                    self._expect(TokenType.SEMICOLON)
-                    return ast.TypedefDecl(name=name, target_type=base_type, location=loc)
+                # typedef enum { ... } Name [, ...] ;
+                first_name = None
+                while True:
+                    name, full_type = self._parse_declarator(base_type)
+                    if not name:
+                        break
+                    self.typedefs[name] = full_type
+                    if first_name is None:
+                        first_name = name
+                    if self._match(TokenType.COMMA):
+                        continue
+                    break
+                self._expect(TokenType.SEMICOLON)
+                return ast.TypedefDecl(name=first_name, target_type=base_type, location=loc)
 
         # Declarators
         declarations = []
