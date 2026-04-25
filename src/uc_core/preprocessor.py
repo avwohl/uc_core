@@ -34,6 +34,10 @@ class PreprocessorState:
     """State for conditional compilation."""
     condition_stack: list[bool] = field(default_factory=list)  # True if currently active
     seen_else: list[bool] = field(default_factory=list)  # Track if #else was seen
+    # `any_taken[-1]` is True iff some `#if` / `#elif` branch in the
+    # current chain has already evaluated true. Used by `#elif` and
+    # `#else` to suppress later branches once a winning one fires.
+    any_taken: list[bool] = field(default_factory=list)
 
 
 class PreprocessorError(Exception):
@@ -421,6 +425,7 @@ class Preprocessor:
             else:
                 self.state.condition_stack.append(False)
             self.state.seen_else.append(False)
+            self.state.any_taken.append(self.state.condition_stack[-1])
 
         elif directive == 'ifndef':
             name = args.strip()
@@ -430,6 +435,7 @@ class Preprocessor:
             else:
                 self.state.condition_stack.append(False)
             self.state.seen_else.append(False)
+            self.state.any_taken.append(self.state.condition_stack[-1])
 
         elif directive == 'if':
             if self._is_active():
@@ -438,6 +444,7 @@ class Preprocessor:
             else:
                 self.state.condition_stack.append(False)
             self.state.seen_else.append(False)
+            self.state.any_taken.append(self.state.condition_stack[-1])
 
         elif directive == 'elif':
             if not self.state.condition_stack:
@@ -447,14 +454,17 @@ class Preprocessor:
                 raise PreprocessorError("#elif after #else",
                                        self.current_file, self.current_line)
 
-            # Check if any previous branch was taken
-            prev_taken = self.state.condition_stack[-1]
             self.state.condition_stack.pop()
-
-            # Evaluate this branch only if no previous branch was taken
-            if not prev_taken and (len(self.state.condition_stack) == 0 or all(self.state.condition_stack)):
+            already = self.state.any_taken[-1]
+            outer_active = (
+                len(self.state.condition_stack) == 0
+                or all(self.state.condition_stack)
+            )
+            if not already and outer_active:
                 result = self._evaluate_condition(args)
                 self.state.condition_stack.append(result)
+                if result:
+                    self.state.any_taken[-1] = True
             else:
                 self.state.condition_stack.append(False)
 
@@ -466,12 +476,15 @@ class Preprocessor:
                 raise PreprocessorError("Multiple #else in conditional",
                                        self.current_file, self.current_line)
 
-            # Flip the condition (only if outer conditions are active)
-            prev_taken = self.state.condition_stack[-1]
             self.state.condition_stack.pop()
-
-            if len(self.state.condition_stack) == 0 or all(self.state.condition_stack):
-                self.state.condition_stack.append(not prev_taken)
+            already = self.state.any_taken[-1]
+            outer_active = (
+                len(self.state.condition_stack) == 0
+                or all(self.state.condition_stack)
+            )
+            if not already and outer_active:
+                self.state.condition_stack.append(True)
+                self.state.any_taken[-1] = True
             else:
                 self.state.condition_stack.append(False)
 
@@ -483,6 +496,7 @@ class Preprocessor:
                                        self.current_file, self.current_line)
             self.state.condition_stack.pop()
             self.state.seen_else.pop()
+            self.state.any_taken.pop()
 
         return None
 
