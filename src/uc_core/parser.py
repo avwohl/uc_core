@@ -1344,8 +1344,28 @@ class Parser:
             else:
                 break
 
-        # Type specifier
-        base_type = self._parse_type_specifier()
+        # Type specifier. Pre-C99 sources sometimes omit the return type
+        # of a function or the type of a variable, defaulting to int —
+        # e.g. `main() { ... }` or `x; static y = 1;`. If the next token
+        # is an IDENTIFIER followed by `(` (function) or `=` / `,` / `;`
+        # (variable), synthesize a `BasicType("int")` and skip the
+        # type-specifier parse so old K&R-style sources compile.
+        if (
+            self._check(TokenType.IDENTIFIER)
+            and self._current().value not in self.typedefs
+        ):
+            saved_pos = self.pos
+            self._advance()
+            looks_like_decl = self._check(TokenType.LPAREN) or self._check(
+                TokenType.SEMICOLON
+            ) or self._check(TokenType.ASSIGN) or self._check(TokenType.COMMA)
+            self.pos = saved_pos
+            if looks_like_decl:
+                base_type = ast.BasicType(name="int", location=loc)
+            else:
+                base_type = self._parse_type_specifier()
+        else:
+            base_type = self._parse_type_specifier()
         # Apply pre-consumed qualifiers
         if pre_const:
             base_type.is_const = True
