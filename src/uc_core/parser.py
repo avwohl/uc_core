@@ -1283,6 +1283,10 @@ class Parser:
 
     def _parse_declaration(self) -> ast.Declaration:
         """Parse a declaration."""
+        # `__attribute__((...))` and friends can lead a declaration
+        # (e.g. `__attribute__((weak)) int foo = 0;`). Eat them first
+        # so the rest of this routine doesn't have to worry.
+        self._skip_noise()
         loc = self._current().location
 
         # _Static_assert / static_assert
