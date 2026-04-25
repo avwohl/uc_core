@@ -929,11 +929,25 @@ class Preprocessor:
         # Handle # (stringification) operator
         body = self._handle_stringification(body, macro.params, args)
 
-        # Handle ## (token pasting) operator
+        # Handle ## (token pasting) operator (uses unexpanded args).
         body = self._handle_token_pasting(body, macro.params, args)
 
+        # For non-#/## uses, parameter values are macro-expanded before
+        # substitution into the body — that's the standard C rule. The
+        # token-pasting handler above already consumed `param ## param`
+        # uses with unexpanded args, so the remaining param mentions in
+        # the body are the ones that want the expansion.
+        expanded_args = []
+        for arg in args:
+            if arg and any(
+                m_name in arg for m_name in self.macros if m_name not in self.expanding
+            ):
+                # Re-scan the argument with the current set of macros.
+                expanded_args.append(self._expand_macros(arg))
+            else:
+                expanded_args.append(arg)
         # Regular parameter substitution
-        for param, arg in zip(macro.params, args):
+        for param, arg in zip(macro.params, expanded_args):
             # Replace parameter with argument (word boundary)
             # Use lambda to prevent re.sub from interpreting escape sequences in arg
             body = re.sub(rf'\b{re.escape(param)}\b', lambda m, a=arg: a, body)
