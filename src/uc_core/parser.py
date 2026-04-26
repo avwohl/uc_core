@@ -747,6 +747,15 @@ class Parser:
 
         if self._match(TokenType.QUESTION):
             loc = self._current().location
+            # GCC `cond ?: alt` shorthand: when `?` is immediately
+            # followed by `:`, the true branch is the cond itself.
+            if self._check(TokenType.COLON):
+                self._advance()  # consume :
+                false_expr = self._parse_ternary_expression()
+                return ast.TernaryOp(
+                    condition=cond, true_expr=cond,
+                    false_expr=false_expr, location=loc,
+                )
             true_expr = self._parse_expression()
             self._expect(TokenType.COLON)
             false_expr = self._parse_ternary_expression()
