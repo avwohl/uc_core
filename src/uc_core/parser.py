@@ -477,18 +477,23 @@ class Parser:
                 # Save the function params from the inner declarator before they get overwritten
                 saved_params = getattr(self, '_last_params', [])
                 self._expect(TokenType.RPAREN)
-                # Parse suffix (array/function) with original base type
-                suffix_type = self._parse_declarator_suffix(base_type)
-                # Apply outer pointer modifiers to the suffix's base.
-                # `int *(p[25])` is "p as array-of-25 of pointer-to-int":
-                # the `*` from outside the paren wraps the array's
-                # element, not the array itself.
+                # Apply outer pointer modifiers to base_type BEFORE
+                # the suffix wraps it. The `*` outside `(p[25])` applies
+                # to the array's element type ("p as array of pointers"),
+                # and the `*` outside `(*fty)()` applies to the
+                # function's return type ("fty as pointer-to-function-
+                # returning-pointer-to-T"). In both cases, wrapping the
+                # base before _parse_declarator_suffix gets the right
+                # nesting.
+                wrapped_base = base_type
                 for is_const, is_volatile in pointer_stack:
-                    suffix_type = ast.PointerType(
-                        base_type=suffix_type,
+                    wrapped_base = ast.PointerType(
+                        base_type=wrapped_base,
                         is_const=is_const,
                         is_volatile=is_volatile,
                     )
+                # Parse suffix (array/function) with the wrapped base.
+                suffix_type = self._parse_declarator_suffix(wrapped_base)
                 # Restore saved params (they belong to the actual function, not the return type)
                 if saved_params:
                     self._last_params = saved_params
