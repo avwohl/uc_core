@@ -905,8 +905,11 @@ class Parser:
                     # Check for compound literal
                     if self._check(TokenType.LBRACE):
                         init = self._parse_initializer_list()
-                        return ast.Compound(target_type=target_type, init=init,
-                                            location=target_type.location)
+                        compound = ast.Compound(target_type=target_type, init=init,
+                                                location=target_type.location)
+                        # Allow `(T){init}[i]` / `.field` / `(args)` to
+                        # chain off the compound literal directly.
+                        return self._parse_postfix_continue(compound)
                     # Regular cast
                     expr = self._parse_cast()
                     return ast.Cast(target_type=target_type, expr=expr,
@@ -927,6 +930,14 @@ class Parser:
             return ast.UnaryOp(op="--", operand=self._parse_unary(), is_prefix=True, location=loc)
         if self._match(TokenType.AMPERSAND):
             return ast.UnaryOp(op="&", operand=self._parse_cast(), is_prefix=True, location=loc)
+        # GCC `&&label` — address-of-label. The lexer produces a single
+        # AND token (`&&`) whether it's a logical-and operator or this
+        # extension; we disambiguate by position (only here in unary
+        # prefix) and by the requirement that an identifier must follow.
+        if self._check(TokenType.AND):
+            self._advance()
+            label_tok = self._expect(TokenType.IDENTIFIER)
+            return ast.LabelAddr(label=label_tok.value, location=loc)
         if self._match(TokenType.STAR):
             return ast.UnaryOp(op="*", operand=self._parse_cast(), is_prefix=True, location=loc)
         if self._match(TokenType.PLUS):
@@ -969,10 +980,14 @@ class Parser:
 
         return self._parse_postfix()
 
-    def _parse_postfix(self) -> ast.Expression:
-        """Parse postfix expression."""
-        expr = self._parse_primary()
+    def _parse_postfix_continue(self, expr: ast.Expression) -> ast.Expression:
+        """Continue postfix-operator parsing on an existing expression.
 
+        Lets `_parse_cast`'s compound-literal branch chain `[i]` /
+        `.field` / `(args)` / `++` directly onto a `(T){init}` so
+        `(int []){1,2,3}[0]` parses as `Index(Compound, 0)` instead of
+        leaving `[0]` for the outer expression context.
+        """
         while True:
             loc = self._current().location
             if self._match(TokenType.LBRACKET):
@@ -988,7 +1003,7 @@ class Parser:
                 # in that slot.
                 if (
                     isinstance(expr, ast.Identifier)
-                    and expr.name == "va_arg"
+                    and expr.name in ("va_arg", "__builtin_va_arg")
                 ):
                     ap = self._parse_assignment_expression()
                     self._expect(TokenType.COMMA)
@@ -1024,6 +1039,10 @@ class Parser:
                 break
 
         return expr
+
+    def _parse_postfix(self) -> ast.Expression:
+        """Parse postfix expression."""
+        return self._parse_postfix_continue(self._parse_primary())
 
     def _parse_primary(self) -> ast.Expression:
         """Parse primary expression."""
@@ -1203,6 +1222,12 @@ class Parser:
 
         # Jump statements
         if self._match(TokenType.GOTO):
+            # GCC computed goto: `goto *expr;` jumps to a label whose
+            # address was taken with `&&label`.
+            if self._match(TokenType.STAR):
+                target = self._parse_expression()
+                self._expect(TokenType.SEMICOLON)
+                return ast.GotoStmt(label="", target=target, location=loc)
             label = self._expect(TokenType.IDENTIFIER).value
             self._expect(TokenType.SEMICOLON)
             return ast.GotoStmt(label=label, location=loc)

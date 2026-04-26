@@ -295,7 +295,20 @@ class LabelStmt(Statement):
 
 @dataclass(kw_only=True)
 class GotoStmt(Statement):
-    """Goto statement."""
+    """Goto statement.
+
+    For named goto, `label` is the destination and `target` is None.
+    For GCC computed goto (`goto *expr;`), `target` is the address
+    expression and `label` is "".
+    """
+    label: str = ""
+    target: Optional[Expression] = None
+
+
+@dataclass(kw_only=True)
+class LabelAddr(Expression):
+    """GCC `&&label` — address of a function-local label, usable as
+    `void *` and as the operand of computed goto."""
     label: str
 
 
