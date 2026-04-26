@@ -1157,10 +1157,13 @@ class Parser:
             return ast.ReturnStmt(value=value, location=loc)
 
         # Inline asm — `asm("template" [: outputs] [: inputs] [: clobbers])`.
-        # We don't honor it; just parse and discard. `volatile` and
-        # qualifiers are skipped via `_skip_noise`.
+        # We don't honor it; just parse and discard.
         if self._match(TokenType.ASM):
-            self._skip_noise()  # asm volatile, asm goto, etc.
+            # `asm volatile`, `asm inline`, `asm goto` — eat the qualifier
+            # tokens and any __attribute__ / _Alignas noise after `asm`.
+            while self._check(TokenType.VOLATILE) or self._check(TokenType.INLINE):
+                self._advance()
+            self._skip_noise()
             self._expect(TokenType.LPAREN)
             template = ""
             if self._check(TokenType.STRING_LITERAL):

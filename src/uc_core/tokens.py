@@ -181,6 +181,8 @@ KEYWORDS = {
     'unsigned': TokenType.UNSIGNED,
     'void': TokenType.VOID,
     'volatile': TokenType.VOLATILE,
+    '__volatile': TokenType.VOLATILE,
+    '__volatile__': TokenType.VOLATILE,
     'while': TokenType.WHILE,
     'alignas': TokenType.ALIGNAS,
     '_Alignas': TokenType.ALIGNAS,

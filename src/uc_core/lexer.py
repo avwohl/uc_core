@@ -222,6 +222,17 @@ class Lexer:
                         self._advance()
                     else:
                         result.append(self._advance())
+        # Hex float fractional part — `0x1.0p-500`. Mandatory `p`
+        # exponent comes after; we just consume the digits between the
+        # dot and the `p`.
+        elif base == 16 and self._peek() == '.':
+            is_float = True
+            result.append(self._advance())  # .
+            while self._is_hex_digit(self._peek()) or self._peek() == "'":
+                if self._peek() == "'":
+                    self._advance()
+                else:
+                    result.append(self._advance())
 
         # Check for exponent (decimal or hex float)
         if base == 10 and self._peek().lower() == 'e':
