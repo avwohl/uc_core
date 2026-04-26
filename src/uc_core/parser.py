@@ -1227,22 +1227,79 @@ class Parser:
                 if isinstance(more, tuple):
                     more = more[0]
                 template += more
-            # Skip optional `: ...` operand groups until matching RPAREN.
-            depth = 1
-            while depth > 0 and not self._check(TokenType.EOF):
-                t = self._current()
-                if t.type == TokenType.LPAREN:
-                    depth += 1
-                elif t.type == TokenType.RPAREN:
-                    depth -= 1
-                    if depth == 0:
+            # Optional `: outputs : inputs : clobbers : labels` groups.
+            # Each operand has shape `[asmSymbol] "constraint" (expr)`.
+            # We don't honor the constraint, but we collect `expr` so a
+            # backend can evaluate it for side effects (e.g. asm("" :
+            # "+r" (*bar())) needs bar() to actually run).
+            operands: list = []
+            group_idx = 0
+            # Helper: consume a `:` or expand `::` into two consecutive
+            # group separators.
+            def _eat_colon():
+                if self._match(TokenType.COLON):
+                    return True
+                if self._check(TokenType.COLONCOLON):
+                    self._advance()
+                    # Treat as two separators by leaving a synthetic
+                    # state: bump twice. We'll use a flag below.
+                    return "double"
+                return False
+            pending_double = False
+            while True:
+                if pending_double:
+                    pending_double = False
+                else:
+                    eat = _eat_colon()
+                    if not eat:
                         break
-                self._advance()
+                    if eat == "double":
+                        pending_double = True
+                if self._check(TokenType.RPAREN) or self._check(TokenType.COLON) or self._check(TokenType.COLONCOLON):
+                    group_idx += 1
+                    continue
+                # Stop at clobbers/labels (3rd+ group). Operand groups
+                # are output (0) and input (1); clobbers/labels (2/3)
+                # are string-literal lists, not expressions.
+                if group_idx >= 2:
+                    # Skip rest until RPAREN or another COLON.
+                    depth = 1
+                    while depth > 0 and not self._check(TokenType.EOF):
+                        t = self._current()
+                        if t.type == TokenType.LPAREN:
+                            depth += 1
+                        elif t.type == TokenType.RPAREN:
+                            if depth == 1:
+                                break
+                            depth -= 1
+                        elif t.type == TokenType.COLON and depth == 1:
+                            break
+                        self._advance()
+                    group_idx += 1
+                    continue
+                # Output / input operands.
+                while True:
+                    # Optional `[name]` symbolic name.
+                    if self._match(TokenType.LBRACKET):
+                        if self._check(TokenType.IDENTIFIER):
+                            self._advance()
+                        self._expect(TokenType.RBRACKET)
+                    # Constraint string.
+                    if self._check(TokenType.STRING_LITERAL):
+                        self._advance()
+                    # The expression.
+                    if self._match(TokenType.LPAREN):
+                        op_expr = self._parse_assignment_expression()
+                        operands.append(op_expr)
+                        self._expect(TokenType.RPAREN)
+                    if not self._match(TokenType.COMMA):
+                        break
+                group_idx += 1
             self._expect(TokenType.RPAREN)
             # Optional trailing semicolon (declaration-style asm doesn't
             # require one, but statement-style usually does).
             self._match(TokenType.SEMICOLON)
-            return ast.AsmStmt(template=template, location=loc)
+            return ast.AsmStmt(template=template, operands=operands, location=loc)
 
         # Case/default labels (in switch)
         if self._match(TokenType.CASE):

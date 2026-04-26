@@ -321,12 +321,15 @@ class AsmStmt(Statement):
     """Inline asm statement (`asm("..." : ... : ...)`).
 
     Backends typically treat this as a no-op since uc_core doesn't
-    interpret the asm template. Stored as the raw template string and
-    the operand groups so a sufficiently motivated backend could honor
-    them.
+    interpret the asm template. The `operands` list captures the
+    expressions in the output/input operand groups so a backend can
+    at least evaluate them for side effects (which gcc semantics
+    require — the constraints define register/memory binding, but
+    the expression itself still executes per call site).
     """
     template: str = ""
     is_volatile: bool = False
+    operands: list = field(default_factory=list)
 
 
 # === Declaration Nodes ===
