@@ -201,6 +201,17 @@ class Parser:
         if len(toks) == 1 and toks[0].type == TokenType.INT_LITERAL:
             v = toks[0].value
             return v[0] if isinstance(v, tuple) else v
+        # Bare `sizeof(T)` — equivalent to `1 * sizeof(T)`.
+        if (
+            len(toks) >= 4
+            and toks[0].type == TokenType.SIZEOF
+            and toks[1].type == TokenType.LPAREN
+            and toks[-1].type == TokenType.RPAREN
+        ):
+            type_toks = toks[2:-1]
+            sz = self._sizeof_token_type(type_toks)
+            if sz is not None:
+                return sz
         # `N * sizeof(T)` shape.
         if len(toks) >= 5:
             # Find an INT_LITERAL and a `sizeof ( <type> )` separated
@@ -536,6 +547,7 @@ class Parser:
         return ast.ArrayType(
             base_type=ty,
             size=ast.IntLiteral(value=count, location=ty.location),
+            is_vector=True,
             location=ty.location,
         )
 
@@ -848,8 +860,13 @@ class Parser:
             while first or self._match(TokenType.COMMA):
                 first = False
                 name, full_type = self._parse_declarator(base_type)
-                # Array parameters adjust to pointer type (C11 6.7.6.3p7)
-                if isinstance(full_type, ast.ArrayType):
+                # Array parameters adjust to pointer type (C11 6.7.6.3p7).
+                # Vectors (GCC vector_size) are passed by value and keep
+                # their ArrayType so they can be addressed in the callee.
+                if (
+                    isinstance(full_type, ast.ArrayType)
+                    and not getattr(full_type, "is_vector", False)
+                ):
                     full_type = ast.PointerType(base_type=full_type.base_type)
                 elif isinstance(full_type, ast.FunctionType):
                     full_type = ast.PointerType(base_type=full_type)
@@ -871,8 +888,13 @@ class Parser:
         # Skip trailing __attribute__ — `int x __attribute__((unused))`
         # is common in test source.
         self._skip_noise()
-        # C11 6.7.6.3p7: Array parameters are adjusted to pointer type
-        if isinstance(full_type, ast.ArrayType):
+        # C11 6.7.6.3p7: Array parameters are adjusted to pointer type.
+        # Vectors (GCC vector_size) are passed by value and keep their
+        # ArrayType so the callee can address per-element.
+        if (
+            isinstance(full_type, ast.ArrayType)
+            and not getattr(full_type, "is_vector", False)
+        ):
             full_type = ast.PointerType(base_type=full_type.base_type)
         # C11 6.7.6.3p8: Function parameters are adjusted to pointer-to-function
         elif isinstance(full_type, ast.FunctionType):
@@ -1622,12 +1644,18 @@ class Parser:
                 outputs=outputs, inputs=inputs, location=loc,
             )
 
-        # Case/default labels (in switch)
+        # Case/default labels (in switch). GCC extension: `case A ... B`
+        # is a range — store both endpoints; codegen emits a range check.
         if self._match(TokenType.CASE):
             value = self._parse_expression()
+            value_end = None
+            if self._match(TokenType.ELLIPSIS):
+                value_end = self._parse_expression()
             self._expect(TokenType.COLON)
             stmt = self._parse_statement()
-            return ast.CaseStmt(value=value, stmt=stmt, location=loc)
+            return ast.CaseStmt(
+                value=value, stmt=stmt, value_end=value_end, location=loc,
+            )
         if self._match(TokenType.DEFAULT):
             self._expect(TokenType.COLON)
             stmt = self._parse_statement()
@@ -1981,8 +2009,13 @@ class Parser:
                 )
 
             # Skip trailing __attribute__ on the declarator (eg.
-            # `char tmp[3] __attribute__((aligned(2)));`).
+            # `char tmp[3] __attribute__((aligned(2)));`). If the
+            # attribute is `vector_size(N)`, apply it to this
+            # declarator's type — the typedef'd / declared name then
+            # has the vector type, e.g.
+            # `typedef int V __attribute__((vector_size(16)));`.
             self._skip_noise()
+            full_type = self._apply_pending_vector_size(full_type)
             # Variable or typedef
             init = None
             if self._match(TokenType.ASSIGN):

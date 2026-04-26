@@ -41,6 +41,7 @@ class ArrayType(TypeNode):
     """Array of another type."""
     base_type: TypeNode
     size: Optional['Expression'] = None  # None for unsized arrays
+    is_vector: bool = False  # True for GCC __attribute__((vector_size))
 
 
 @dataclass(kw_only=True)
@@ -284,6 +285,7 @@ class CaseStmt(Statement):
     """Case label in switch."""
     value: Optional[Expression]  # None for default
     stmt: Statement
+    value_end: Optional[Expression] = None  # for `case A ... B` ranges
 
 
 @dataclass(kw_only=True)
