@@ -1555,6 +1555,17 @@ class Parser:
             # Check it's not a label (identifier followed by colon)
             if self._peek(1).type != TokenType.COLON:
                 return True
+        # GCC `__extension__` and friends — declaration noise that must
+        # be peeked through to see if a declaration follows.
+        if (
+            self._check(TokenType.IDENTIFIER)
+            and self._current().value in self._DOS_IGNORED_IDENTS
+        ):
+            saved = self.pos
+            self._skip_noise()
+            ok = self._is_declaration_start()
+            self.pos = saved
+            return ok
         return False
 
     def _parse_declaration(self) -> ast.Declaration:
