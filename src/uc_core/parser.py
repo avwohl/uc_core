@@ -82,6 +82,10 @@ class Parser:
         self.pos = 0
         self.typedefs: dict[str, ast.TypeNode] = {}  # Map typedef names to target types
         self._last_params: list[ast.ParamDecl] = []  # Store params from last function declarator
+        # Set transiently by `_skip_gcc_attribute` when it sees
+        # `vector_size(N)`. The next type-specifier consumes it and
+        # wraps its base type in an ArrayType of the right shape.
+        self._pending_vector_size: int | None = None
 
     def _current(self) -> Token:
         """Get current token."""
@@ -126,21 +130,134 @@ class Parser:
         return ParseError(message, self._current().location)
 
     def _skip_gcc_attribute(self) -> None:
-        """Skip GCC __attribute__((...)) syntax."""
+        """Skip GCC __attribute__((...)) syntax.
+
+        Most attributes are no-ops, but `vector_size(N)` (and a small
+        set of common N expressions) sets `_pending_vector_size` so
+        the next type-specifier can wrap its base type into an array
+        of the right shape. Treating vectors as arrays gets us init,
+        indexing, and storage for free; vector arithmetic still
+        falls through to the regular scalar path (so per-element
+        ops aren't auto-componentwise).
+        """
         while (self._check(TokenType.IDENTIFIER) and
                self._current().value in ('__attribute__', '__attribute')):
             self._advance()  # __attribute__
             if self._match(TokenType.LPAREN):
                 if self._match(TokenType.LPAREN):
-                    # Skip until matching ))
+                    # Skip until matching )), but watch for
+                    # `vector_size (N)` along the way.
                     depth = 2
                     while depth > 0 and not self._check(TokenType.EOF):
+                        if (
+                            self._check(TokenType.IDENTIFIER)
+                            and self._current().value in (
+                                "vector_size", "__vector_size__",
+                            )
+                        ):
+                            self._advance()  # vector_size
+                            n = self._read_vector_size_arg()
+                            if n is not None:
+                                self._pending_vector_size = n
+                            continue
                         if self._match(TokenType.LPAREN):
                             depth += 1
                         elif self._match(TokenType.RPAREN):
                             depth -= 1
                         else:
                             self._advance()
+
+    def _read_vector_size_arg(self) -> int | None:
+        """Extract the integer N from `vector_size(N)` by raw-token
+        inspection. Handles literal int, `N * sizeof(T)`, and a few
+        other constant patterns used in real torture sources. Always
+        consumes through the matching `)`.
+        """
+        if not self._match(TokenType.LPAREN):
+            return None
+        # Capture tokens up to the matching `)`.
+        start = self.pos
+        depth = 1
+        while depth > 0 and not self._check(TokenType.EOF):
+            if self._match(TokenType.LPAREN):
+                depth += 1
+            elif self._match(TokenType.RPAREN):
+                depth -= 1
+            else:
+                self._advance()
+        toks = self.tokens[start:self.pos - 1]
+        return self._fold_vector_size_tokens(toks)
+
+    def _fold_vector_size_tokens(self, toks: list) -> int | None:
+        """Fold a small subset of constant integer expressions used as
+        the argument to `vector_size`. Recognized:
+
+        - `N` (single int literal)
+        - `N * sizeof (T)` / `sizeof (T) * N`
+        - `N * M` between literals
+
+        Anything else returns None (we then leave the type alone).
+        """
+        if len(toks) == 1 and toks[0].type == TokenType.INT_LITERAL:
+            v = toks[0].value
+            return v[0] if isinstance(v, tuple) else v
+        # `N * sizeof(T)` shape.
+        if len(toks) >= 5:
+            # Find an INT_LITERAL and a `sizeof ( <type> )` separated
+            # by `*`. Order doesn't matter.
+            int_v = None
+            type_size = None
+            i = 0
+            while i < len(toks):
+                t = toks[i]
+                if t.type == TokenType.INT_LITERAL and int_v is None:
+                    v = t.value
+                    int_v = v[0] if isinstance(v, tuple) else v
+                elif (
+                    t.type == TokenType.SIZEOF
+                    and i + 2 < len(toks)
+                    and toks[i + 1].type == TokenType.LPAREN
+                ):
+                    # Find matching `)`.
+                    j = i + 2
+                    depth = 1
+                    while j < len(toks) and depth > 0:
+                        if toks[j].type == TokenType.LPAREN:
+                            depth += 1
+                        elif toks[j].type == TokenType.RPAREN:
+                            depth -= 1
+                        if depth > 0:
+                            j += 1
+                    type_toks = toks[i + 2:j]
+                    type_size = self._sizeof_token_type(type_toks)
+                    i = j  # skip past `)`
+                i += 1
+            if int_v is not None and type_size is not None:
+                return int_v * type_size
+        return None
+
+    def _sizeof_token_type(self, toks: list) -> int | None:
+        """Map a tiny subset of type-name token sequences to byte sizes.
+        Lets `sizeof(T)` inside a `vector_size` arg be folded.
+        """
+        names = []
+        for t in toks:
+            if t.type == TokenType.IDENTIFIER:
+                names.append(t.value)
+            elif hasattr(t.type, "name"):
+                names.append(t.type.name.lower())
+        joined = " ".join(names)
+        # Quick lookup table for the common types used in
+        # `vector_size(N * sizeof(T))`.
+        TABLE = {
+            "char": 1, "schar": 1, "uchar": 1,
+            "short": 2, "ushort": 2,
+            "int": 4, "uint": 4, "long": 4, "ulong": 4,
+            "long long": 8, "long_long": 8,
+            "float": 4, "double": 8,
+            "void *": 4,
+        }
+        return TABLE.get(joined)
 
     def _skip_dos_specifiers(self) -> None:
         """Skip DOS-era non-standard specifiers (near/far/huge, __cdecl,
@@ -356,8 +473,40 @@ class Parser:
             return ast.ComplexType(base_type=base_type, is_const=is_const,
                                    is_volatile=is_volatile, location=loc)
 
-        return ast.BasicType(name=base_type, is_signed=is_signed,
-                             is_const=is_const, is_volatile=is_volatile, location=loc)
+        return ast.BasicType(
+            name=base_type, is_signed=is_signed,
+            is_const=is_const, is_volatile=is_volatile, location=loc,
+        )
+
+    def _apply_pending_vector_size(self, ty):
+        """If `_skip_gcc_attribute` saw a `vector_size(N)`, wrap `ty`
+        as an ArrayType of N/elem_size elements. We treat vectors as
+        arrays for storage/init/indexing; per-element arithmetic
+        isn't auto-componentwise.
+        """
+        if self._pending_vector_size is None:
+            return ty
+        sz = self._pending_vector_size
+        self._pending_vector_size = None
+        # Find the leaf BasicType to get its size.
+        leaf = ty
+        while isinstance(leaf, (ast.PointerType, ast.ArrayType)):
+            leaf = leaf.base_type
+        if not isinstance(leaf, ast.BasicType):
+            return ty
+        elem_size = {
+            "char": 1, "short": 2, "int": 4, "long": 4,
+            "long long": 8, "float": 4, "double": 8,
+            "long double": 8, "bool": 1,
+        }.get(leaf.name, 4)
+        count = sz // elem_size if elem_size > 0 else 0
+        if count <= 0:
+            return ty
+        return ast.ArrayType(
+            base_type=ty,
+            size=ast.IntLiteral(value=count, location=ty.location),
+            location=ty.location,
+        )
 
     def _parse_struct_type(self) -> ast.StructType:
         """Parse struct/union type, including inline member definitions."""
@@ -508,6 +657,11 @@ class Parser:
 
         # Parse array and function suffixes
         result_type = self._parse_declarator_suffix(base_type)
+        # Trailing `__attribute__((vector_size(N)))` (also covers
+        # attributes that landed before the name and stashed N on
+        # `_pending_vector_size`).
+        self._skip_noise()
+        result_type = self._apply_pending_vector_size(result_type)
         return name, result_type
 
     def _is_paren_function(self) -> bool:
@@ -930,6 +1084,11 @@ class Parser:
 
     def _parse_unary(self) -> ast.Expression:
         """Parse unary expression."""
+        # `__extension__ expr` — GCC pedantic-suppression qualifier
+        # before an expression. Eat any leading noise (also covers
+        # things like `__attribute__((...))` before a primary, though
+        # those normally land in declarations).
+        self._skip_noise()
         loc = self._current().location
 
         # Prefix operators
