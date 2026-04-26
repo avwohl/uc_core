@@ -316,6 +316,19 @@ class ReturnStmt(Statement):
     value: Optional[Expression] = None
 
 
+@dataclass(kw_only=True)
+class AsmStmt(Statement):
+    """Inline asm statement (`asm("..." : ... : ...)`).
+
+    Backends typically treat this as a no-op since uc_core doesn't
+    interpret the asm template. Stored as the raw template string and
+    the operand groups so a sufficiently motivated backend could honor
+    them.
+    """
+    template: str = ""
+    is_volatile: bool = False
+
+
 # === Declaration Nodes ===
 
 @dataclass(kw_only=True)

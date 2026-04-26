@@ -75,6 +75,7 @@ class TokenType(Enum):
     IMAGINARY = auto()
     NORETURN = auto()
     BITINT = auto()
+    ASM = auto()
 
     # Punctuators (C24 Section 6.4.7)
     LBRACKET = auto()      # [
@@ -160,6 +161,9 @@ KEYWORDS = {
     'restrict': TokenType.RESTRICT,
     '__restrict': TokenType.RESTRICT,
     '__restrict__': TokenType.RESTRICT,
+    'asm': TokenType.ASM,
+    '__asm': TokenType.ASM,
+    '__asm__': TokenType.ASM,
     'return': TokenType.RETURN,
     'short': TokenType.SHORT,
     'signed': TokenType.SIGNED,

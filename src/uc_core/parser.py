@@ -1156,6 +1156,40 @@ class Parser:
             self._expect(TokenType.SEMICOLON)
             return ast.ReturnStmt(value=value, location=loc)
 
+        # Inline asm — `asm("template" [: outputs] [: inputs] [: clobbers])`.
+        # We don't honor it; just parse and discard. `volatile` and
+        # qualifiers are skipped via `_skip_noise`.
+        if self._match(TokenType.ASM):
+            self._skip_noise()  # asm volatile, asm goto, etc.
+            self._expect(TokenType.LPAREN)
+            template = ""
+            if self._check(TokenType.STRING_LITERAL):
+                template = self._advance().value
+                if isinstance(template, tuple):
+                    template = template[0]
+            # Concatenate adjacent strings.
+            while self._check(TokenType.STRING_LITERAL):
+                more = self._advance().value
+                if isinstance(more, tuple):
+                    more = more[0]
+                template += more
+            # Skip optional `: ...` operand groups until matching RPAREN.
+            depth = 1
+            while depth > 0 and not self._check(TokenType.EOF):
+                t = self._current()
+                if t.type == TokenType.LPAREN:
+                    depth += 1
+                elif t.type == TokenType.RPAREN:
+                    depth -= 1
+                    if depth == 0:
+                        break
+                self._advance()
+            self._expect(TokenType.RPAREN)
+            # Optional trailing semicolon (declaration-style asm doesn't
+            # require one, but statement-style usually does).
+            self._match(TokenType.SEMICOLON)
+            return ast.AsmStmt(template=template, location=loc)
+
         # Case/default labels (in switch)
         if self._match(TokenType.CASE):
             value = self._parse_expression()
