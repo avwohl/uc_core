@@ -640,6 +640,9 @@ class Parser:
         self._match(TokenType.REGISTER)
         base_type = self._parse_type_specifier()
         name, full_type = self._parse_declarator(base_type)
+        # Skip trailing __attribute__ — `int x __attribute__((unused))`
+        # is common in test source.
+        self._skip_noise()
         # C11 6.7.6.3p7: Array parameters are adjusted to pointer type
         if isinstance(full_type, ast.ArrayType):
             full_type = ast.PointerType(base_type=full_type.base_type)
