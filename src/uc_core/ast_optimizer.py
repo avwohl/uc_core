@@ -791,7 +791,21 @@ class ASTOptimizer:
             x = left.left
             # Use wider mask of the two constants
             is_long = right.is_long or left.right.is_long
+            is_long_long = (
+                getattr(right, 'is_long_long', False)
+                or getattr(left.right, 'is_long_long', False)
+            )
+            is_unsigned = right.is_unsigned or left.right.is_unsigned
             mask = max(self._literal_mask(right), self._literal_mask(left.right))
+
+            def _new(val: int) -> ast.IntLiteral:
+                return ast.IntLiteral(
+                    value=val,
+                    is_long=is_long,
+                    is_long_long=is_long_long,
+                    is_unsigned=is_unsigned,
+                    location=right.location,
+                )
 
             # (x + c1) + c2 → x + (c1 + c2)
             if op == "+" and inner_op == "+":
@@ -802,8 +816,7 @@ class ASTOptimizer:
                     combined -= (mask + 1)
                 self._stat("nested_fold")
                 self._changed = True
-                return ast.BinaryOp(op="+", left=x, right=ast.IntLiteral(
-                    value=combined, is_long=is_long, location=right.location),
+                return ast.BinaryOp(op="+", left=x, right=_new(combined),
                     location=expr.location)
 
             # (x - c1) + c2 → x + (c2 - c1)
@@ -816,8 +829,7 @@ class ASTOptimizer:
                 self._changed = True
                 if combined == 0:
                     return x
-                return ast.BinaryOp(op="+", left=x, right=ast.IntLiteral(
-                    value=combined, is_long=is_long, location=right.location),
+                return ast.BinaryOp(op="+", left=x, right=_new(combined),
                     location=expr.location)
 
             # (x + c1) - c2 → x + (c1 - c2)
@@ -830,8 +842,7 @@ class ASTOptimizer:
                 self._changed = True
                 if combined == 0:
                     return x
-                return ast.BinaryOp(op="+", left=x, right=ast.IntLiteral(
-                    value=combined, is_long=is_long, location=right.location),
+                return ast.BinaryOp(op="+", left=x, right=_new(combined),
                     location=expr.location)
 
             # (x - c1) - c2 → x - (c1 + c2)
@@ -839,8 +850,7 @@ class ASTOptimizer:
                 combined = (c1 + c2) & mask
                 self._stat("nested_fold")
                 self._changed = True
-                return ast.BinaryOp(op="-", left=x, right=ast.IntLiteral(
-                    value=combined, is_long=is_long, location=right.location),
+                return ast.BinaryOp(op="-", left=x, right=_new(combined),
                     location=expr.location)
 
             # (x * c1) * c2 → x * (c1 * c2)
@@ -848,8 +858,7 @@ class ASTOptimizer:
                 combined = (c1 * c2) & mask
                 self._stat("nested_fold")
                 self._changed = True
-                return ast.BinaryOp(op="*", left=x, right=ast.IntLiteral(
-                    value=combined, is_long=is_long, location=right.location),
+                return ast.BinaryOp(op="*", left=x, right=_new(combined),
                     location=expr.location)
 
             # (x << c1) << c2 → x << (c1 + c2)
