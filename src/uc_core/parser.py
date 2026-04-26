@@ -374,6 +374,9 @@ class Parser:
                     bit_width = None
                     if self._match(TokenType.COLON):
                         bit_width = self._parse_expression()
+                    # Skip trailing __attribute__ on the declarator
+                    # (e.g. `int x __attribute__((packed))`).
+                    self._skip_noise()
                     members.append(ast.StructMember(name=member_name if member_name else None,
                                                     member_type=full_type, bit_width=bit_width))
                     if not self._match(TokenType.COMMA):
