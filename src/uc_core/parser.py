@@ -329,6 +329,15 @@ class Parser:
                 base_type = "int"
             elif is_complex:
                 base_type = "double"  # _Complex alone defaults to double
+            elif (
+                self._check(TokenType.IDENTIFIER)
+                or self._check(TokenType.STAR)
+                or self._check(TokenType.LPAREN)
+            ):
+                # Implicit int (pre-C99): `static foo[10];` or
+                # `f(args) { ... }`. Default to `int` when the next
+                # token starts a declarator.
+                base_type = "int"
             else:
                 raise self._error("Expected type specifier")
 
