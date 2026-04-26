@@ -1506,6 +1506,10 @@ class Parser:
         declarations = []
 
         while not self._check(TokenType.EOF):
+            # Tolerate stray semicolons at file scope (e.g. `};` after a
+            # function body, which some C code uses out of habit).
+            if self._match(TokenType.SEMICOLON):
+                continue
             declarations.append(self._parse_declaration())
 
         return ast.TranslationUnit(declarations=declarations, location=loc)
