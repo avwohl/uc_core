@@ -464,12 +464,25 @@ class Parser:
 
         # Handle complex types
         if is_complex:
-            # _Complex requires floating-point base type
-            if base_type not in ("float", "double", "long double"):
-                if is_long >= 1:
-                    base_type = "long double"
-                else:
-                    base_type = "double"  # Default to double for invalid combinations
+            # _Complex requires an arithmetic base type. Standard C
+            # allows only floating-point; GCC extension permits the
+            # integer types too. Honor `long` / `long long`
+            # multiplicity for both.
+            if base_type in ("float", "double", "long double"):
+                pass
+            elif base_type in ("char", "short", "int", "long",
+                               "long long", "bool"):
+                if is_long >= 2:
+                    base_type = "long long"
+                elif is_long == 1:
+                    base_type = "long"
+            elif base_type is None:
+                # `_Complex` alone — default to `_Complex double`
+                # (or `long double` if `long` was seen).
+                base_type = "long double" if is_long >= 1 else "double"
+            else:
+                # Anything else falls back to double for safety.
+                base_type = "double"
             return ast.ComplexType(base_type=base_type, is_const=is_const,
                                    is_volatile=is_volatile, location=loc)
 
