@@ -198,6 +198,8 @@ KEYWORDS = {
     '_Alignas': TokenType.ALIGNAS,
     'alignof': TokenType.ALIGNOF,
     '_Alignof': TokenType.ALIGNOF,
+    '__alignof__': TokenType.ALIGNOF,
+    '__alignof': TokenType.ALIGNOF,
     '_Atomic': TokenType.ATOMIC,
     'atomic': TokenType.ATOMIC,
     'bool': TokenType.BOOL,

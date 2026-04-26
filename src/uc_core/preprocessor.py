@@ -524,6 +524,37 @@ class Preprocessor:
         # Expand macros in the expression
         expr = self._expand_macros(expr)
 
+        # Replace character literals (`'x'`, `L'x'`, `'\400'`, `'\xff'`,
+        # etc.) with their integer values so Python can evaluate them.
+        # Done BEFORE identifier elision so the optional L/u/U prefix
+        # isn't first stomped to 0.
+        def _char_to_int(m: "re.Match") -> str:
+            body = m.group(2)
+            if body.startswith("\\"):
+                esc = body[1:]
+                if esc == "n": return "10"
+                if esc == "t": return "9"
+                if esc == "r": return "13"
+                if esc == "0": return "0"
+                if esc == "\\": return "92"
+                if esc == "'": return "39"
+                if esc == '"': return "34"
+                if esc == "a": return "7"
+                if esc == "b": return "8"
+                if esc == "f": return "12"
+                if esc == "v": return "11"
+                if esc == "?": return "63"
+                if esc.startswith("x"):
+                    return str(int(esc[1:], 16))
+                if esc[0].isdigit():
+                    return str(int(esc, 8))
+                return "0"
+            return str(ord(body))
+        expr = re.sub(
+            r"(L|u8|u|U)?'((?:\\.|[^'\\])+)'",
+            _char_to_int, expr,
+        )
+
         # Replace remaining identifiers with 0 (undefined macros)
         # First handle function-like calls on undefined macros: IDENT(...) -> 0
         # This prevents "0(args)" which Python can't evaluate

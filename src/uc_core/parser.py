@@ -1227,6 +1227,20 @@ class Parser:
         """Parse a single initializer (possibly designated)."""
         loc = self._current().location
 
+        # GNU-style `name : value` designator (predates the C99 form
+        # `.name = value`). Looks like `IDENTIFIER COLON ...`.
+        if (
+            self._check(TokenType.IDENTIFIER)
+            and self.pos + 1 < len(self.tokens)
+            and self.tokens[self.pos + 1].type == TokenType.COLON
+        ):
+            member = self._advance().value
+            self._advance()  # skip COLON
+            value = self._parse_initializer()
+            return ast.DesignatedInit(
+                designators=[member], value=value, location=loc,
+            )
+
         # Check for designated initializer
         designators = []
         while True:
