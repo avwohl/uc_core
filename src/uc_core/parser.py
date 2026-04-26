@@ -891,6 +891,16 @@ class Parser:
             return ast.UnaryOp(op="~", operand=self._parse_cast(), is_prefix=True, location=loc)
         if self._match(TokenType.BANG):
             return ast.UnaryOp(op="!", operand=self._parse_cast(), is_prefix=True, location=loc)
+        # GCC `__real__ x` and `__imag__ x` — extract real/imaginary
+        # part of a complex value. We parse them as unary ops; backends
+        # that don't support complex can treat them as identity (real)
+        # or zero (imag) for non-complex operands.
+        if self._match(TokenType.REAL):
+            return ast.UnaryOp(op="__real__", operand=self._parse_unary(),
+                               is_prefix=True, location=loc)
+        if self._match(TokenType.IMAG):
+            return ast.UnaryOp(op="__imag__", operand=self._parse_unary(),
+                               is_prefix=True, location=loc)
 
         # sizeof
         if self._match(TokenType.SIZEOF):

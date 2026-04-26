@@ -346,11 +346,16 @@ class ASTOptimizer:
             # are effectively unsigned (e.g., 0xab00 is unsigned int on 16-bit)
             unsigned = (self._is_effectively_unsigned(left) or
                         self._is_effectively_unsigned(right))
-            is_long = left.is_long or right.is_long or mask >= 0xFFFFFFFF
+            # `is_long` propagates from operand suffixes; widening from
+            # `mask` is only meaningful if the mask exceeds the target
+            # int width. On 32-bit-int targets, mask=0xFFFFFFFF doesn't
+            # mean "long" (which is also 32-bit); only mask > uint_max
+            # would force a long-or-wider promotion.
+            is_long = left.is_long or right.is_long or mask > self.type_config.uint_max
             is_long_long = (
                 getattr(left, 'is_long_long', False)
                 or getattr(right, 'is_long_long', False)
-                or mask > 0xFFFFFFFF
+                or mask > self.type_config.ulong_max
             )
             result = self._fold_constants(op, left.value, right.value, unsigned, mask)
             if result is not None:
