@@ -466,6 +466,16 @@ class Parser:
                 self._expect(TokenType.RPAREN)
                 # Parse suffix (array/function) with original base type
                 suffix_type = self._parse_declarator_suffix(base_type)
+                # Apply outer pointer modifiers to the suffix's base.
+                # `int *(p[25])` is "p as array-of-25 of pointer-to-int":
+                # the `*` from outside the paren wraps the array's
+                # element, not the array itself.
+                for is_const, is_volatile in pointer_stack:
+                    suffix_type = ast.PointerType(
+                        base_type=suffix_type,
+                        is_const=is_const,
+                        is_volatile=is_volatile,
+                    )
                 # Restore saved params (they belong to the actual function, not the return type)
                 if saved_params:
                     self._last_params = saved_params
@@ -1545,6 +1555,9 @@ class Parser:
                     location=loc
                 )
 
+            # Skip trailing __attribute__ on the declarator (eg.
+            # `char tmp[3] __attribute__((aligned(2)));`).
+            self._skip_noise()
             # Variable or typedef
             init = None
             if self._match(TokenType.ASSIGN):

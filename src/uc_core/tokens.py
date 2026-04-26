@@ -173,6 +173,8 @@ KEYWORDS = {
     'return': TokenType.RETURN,
     'short': TokenType.SHORT,
     'signed': TokenType.SIGNED,
+    '__signed': TokenType.SIGNED,
+    '__signed__': TokenType.SIGNED,
     'sizeof': TokenType.SIZEOF,
     'static': TokenType.STATIC,
     'static_assert': TokenType.STATIC_ASSERT,
