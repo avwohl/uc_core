@@ -351,6 +351,24 @@ class Parser:
 
         loc = self._current().location
 
+        # `typeof(expr)` / `typeof_unqual(expr)` — GCC extension and
+        # C23 form. The operand can be an expression OR a type-name.
+        # We always model the result as `TypeofType(expr)` and let
+        # codegen resolve, except when the operand is a type-name —
+        # then return it directly.
+        if self._check(TokenType.TYPEOF, TokenType.TYPEOF_UNQUAL):
+            self._advance()
+            self._expect(TokenType.LPAREN)
+            if self._is_type_name():
+                target = self._parse_type_name()
+                self._expect(TokenType.RPAREN)
+                return self._apply_pending_vector_size(target)
+            inner = self._parse_expression()
+            self._expect(TokenType.RPAREN)
+            return self._apply_pending_vector_size(
+                ast.TypeofType(operand=inner, location=loc),
+            )
+
         # Collect type specifiers
         is_signed = None
         is_unsigned = False

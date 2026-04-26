@@ -313,6 +313,16 @@ class LabelAddr(Expression):
 
 
 @dataclass(kw_only=True)
+class TypeofType(TypeNode):
+    """`typeof(expr)` — the type of `expr`. Resolved at codegen time
+    by walking the operand and computing its type. Used in places
+    where a type-name is expected (declarations, casts, sizeof,
+    va_arg).
+    """
+    operand: Expression
+
+
+@dataclass(kw_only=True)
 class TypesCompatibleP(Expression):
     """`__builtin_types_compatible_p(T1, T2)` — compile-time int 0/1
     indicating whether two types are C-compatible. Backends fold to a
