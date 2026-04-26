@@ -313,6 +313,29 @@ class LabelAddr(Expression):
 
 
 @dataclass(kw_only=True)
+class TypesCompatibleP(Expression):
+    """`__builtin_types_compatible_p(T1, T2)` — compile-time int 0/1
+    indicating whether two types are C-compatible. Backends fold to a
+    constant."""
+    t1: TypeNode
+    t2: TypeNode
+
+
+@dataclass(kw_only=True)
+class OffsetofExpr(Expression):
+    """`__builtin_offsetof(T, designator)` — compile-time byte offset
+    of a member within a struct/union type.
+
+    `designator` is encoded as a Member/Index chain rooted at a
+    synthetic `Identifier(name='__offsetof_root')` of `target_type`.
+    The codegen walks the chain to compute the integer offset and
+    emits it as a constant.
+    """
+    target_type: TypeNode
+    designator: Expression
+
+
+@dataclass(kw_only=True)
 class BreakStmt(Statement):
     """Break statement."""
     pass

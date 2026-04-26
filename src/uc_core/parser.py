@@ -1003,6 +1003,66 @@ class Parser:
                 # in that slot.
                 if (
                     isinstance(expr, ast.Identifier)
+                    and expr.name == "__builtin_types_compatible_p"
+                ):
+                    # __builtin_types_compatible_p(T1, T2) — both args
+                    # are type names. Returns int (0 or 1). Encoded as
+                    # a TypesCompatibleP AST node so codegen can fold.
+                    t1 = self._parse_type_name()
+                    self._expect(TokenType.COMMA)
+                    t2 = self._parse_type_name()
+                    self._expect(TokenType.RPAREN)
+                    expr = ast.TypesCompatibleP(
+                        t1=t1, t2=t2, location=loc,
+                    )
+                    continue
+                if (
+                    isinstance(expr, ast.Identifier)
+                    and expr.name == "__builtin_offsetof"
+                ):
+                    # __builtin_offsetof(type, member-designator)
+                    target_type = self._parse_type_name()
+                    self._expect(TokenType.COMMA)
+                    # The designator is a sequence of `.member` and
+                    # `[index]` with an initial member name. We build a
+                    # SizeofType-style synthetic so the codegen can
+                    # compute the offset. Encode as a list of
+                    # ("." | "[", value) pairs in a side data structure,
+                    # smuggled via a Member chain rooted at a synthetic
+                    # `__offsetof_root` Identifier of the right type.
+                    root = ast.Identifier(
+                        name="__offsetof_root", location=loc,
+                    )
+                    cur: ast.Expression = root
+                    # First designator must be a member name.
+                    member_tok = self._expect(TokenType.IDENTIFIER)
+                    cur = ast.Member(
+                        obj=cur, member=member_tok.value,
+                        is_arrow=False, location=loc,
+                    )
+                    while True:
+                        if self._match(TokenType.DOT):
+                            mt = self._expect(TokenType.IDENTIFIER)
+                            cur = ast.Member(
+                                obj=cur, member=mt.value,
+                                is_arrow=False, location=loc,
+                            )
+                        elif self._match(TokenType.LBRACKET):
+                            idx = self._parse_expression()
+                            self._expect(TokenType.RBRACKET)
+                            cur = ast.Index(
+                                array=cur, index=idx, location=loc,
+                            )
+                        else:
+                            break
+                    self._expect(TokenType.RPAREN)
+                    expr = ast.OffsetofExpr(
+                        target_type=target_type, designator=cur,
+                        location=loc,
+                    )
+                    continue
+                if (
+                    isinstance(expr, ast.Identifier)
                     and expr.name in ("va_arg", "__builtin_va_arg")
                 ):
                     ap = self._parse_assignment_expression()
@@ -1371,6 +1431,20 @@ class Parser:
 
         items = []
         while not self._check(TokenType.RBRACE, TokenType.EOF):
+            # GCC `__label__ name1, name2;` — local label declaration.
+            # Codegen treats labels as function-local anyway, so we
+            # parse and discard.
+            if (
+                self._check(TokenType.IDENTIFIER)
+                and self._current().value == "__label__"
+            ):
+                self._advance()
+                while True:
+                    self._expect(TokenType.IDENTIFIER)
+                    if not self._match(TokenType.COMMA):
+                        break
+                self._expect(TokenType.SEMICOLON)
+                continue
             if self._is_declaration_start():
                 items.append(self._parse_declaration())
             else:
