@@ -1059,6 +1059,42 @@ class ASTOptimizer:
         return False
 
     @staticmethod
+    def _expr_has_pointer_or_call(expr: ast.Expression) -> bool:
+        """Does `expr` contain a pointer dereference or a function
+        call? Used by the dead-store eliminator to bail when the
+        second store's RHS could observe the first via aliasing.
+        """
+        if isinstance(expr, ast.UnaryOp) and expr.op == "*":
+            return True
+        if isinstance(expr, ast.Member) and expr.is_arrow:
+            return True
+        if isinstance(expr, ast.Call):
+            return True
+        if isinstance(expr, ast.BinaryOp):
+            return (
+                ASTOptimizer._expr_has_pointer_or_call(expr.left)
+                or ASTOptimizer._expr_has_pointer_or_call(expr.right)
+            )
+        if isinstance(expr, ast.UnaryOp):
+            return ASTOptimizer._expr_has_pointer_or_call(expr.operand)
+        if isinstance(expr, ast.TernaryOp):
+            return (
+                ASTOptimizer._expr_has_pointer_or_call(expr.condition)
+                or ASTOptimizer._expr_has_pointer_or_call(expr.true_expr)
+                or ASTOptimizer._expr_has_pointer_or_call(expr.false_expr)
+            )
+        if isinstance(expr, ast.Index):
+            return (
+                ASTOptimizer._expr_has_pointer_or_call(expr.array)
+                or ASTOptimizer._expr_has_pointer_or_call(expr.index)
+            )
+        if isinstance(expr, ast.Cast):
+            return ASTOptimizer._expr_has_pointer_or_call(expr.expr)
+        if isinstance(expr, ast.Member):
+            return ASTOptimizer._expr_has_pointer_or_call(expr.obj)
+        return False
+
+    @staticmethod
     def _expr_references_var(expr: ast.Expression, name: str) -> bool:
         """Check if expression tree references a variable by name."""
         if isinstance(expr, ast.Identifier):
@@ -1400,8 +1436,13 @@ class ASTOptimizer:
                     if (first_rhs is not None
                             and not self._expr_has_side_effects(first_rhs)
                             and second_rhs is not None
-                            and not self._expr_references_var(second_rhs, first_target)):
-                        # Dead store: skip first assignment
+                            and not self._expr_references_var(second_rhs, first_target)
+                            and not self._expr_has_pointer_or_call(second_rhs)):
+                        # Dead store: skip first assignment.
+                        # We're conservative when the second RHS contains
+                        # a pointer dereference or function call — either
+                        # could observe the first store via aliasing
+                        # (e.g. `b = a; b = *p;` where p points to b).
                         self._stat("dead_store")
                         self._changed = True
                         i += 1  # Skip to second, which will be added next iteration
