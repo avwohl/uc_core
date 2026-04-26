@@ -983,9 +983,12 @@ class Parser:
                 value, suffix = token.value
                 base = 10
             is_long = 'l' in suffix
+            is_long_long = suffix.count('l') >= 2
             is_unsigned = 'u' in suffix
             is_hex = base in (16, 8, 2)
-            return ast.IntLiteral(value=value, is_long=is_long, is_unsigned=is_unsigned,
+            return ast.IntLiteral(value=value, is_long=is_long,
+                                  is_long_long=is_long_long,
+                                  is_unsigned=is_unsigned,
                                   is_hex=is_hex, location=loc)
         if self._check(TokenType.FLOAT_LITERAL):
             tok = self._advance()

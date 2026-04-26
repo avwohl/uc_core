@@ -90,7 +90,8 @@ class Expression(Node):
 class IntLiteral(Expression):
     """Integer literal."""
     value: int
-    is_long: bool = False     # True if has L/LL suffix
+    is_long: bool = False     # True if has L or LL suffix
+    is_long_long: bool = False  # True if has LL suffix (forces long-long width)
     is_unsigned: bool = False  # True if has U suffix
     is_hex: bool = False      # True if hex/octal literal (affects type promotion)
 

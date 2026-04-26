@@ -173,10 +173,21 @@ class ASTOptimizer:
                 self._changed = True
                 stmt.body = ast.CompoundStmt(items=[], location=stmt.location)
             else:
+                # The body may run multiple times and re-enter the
+                # condition with mutated state. Copy/CSE caches built
+                # before the loop don't apply to subsequent iterations.
+                if self.opt_level >= 3:
+                    self._clear_all_caches()
                 self._optimize_stmt(stmt.body)
+                if self.opt_level >= 3:
+                    self._clear_all_caches()
 
         elif isinstance(stmt, ast.DoWhileStmt):
+            if self.opt_level >= 3:
+                self._clear_all_caches()
             self._optimize_stmt(stmt.body)
+            if self.opt_level >= 3:
+                self._clear_all_caches()
             stmt.condition = self._optimize_expr(stmt.condition)
 
         elif isinstance(stmt, ast.ForStmt):
@@ -189,7 +200,11 @@ class ASTOptimizer:
                 stmt.condition = self._optimize_expr(stmt.condition)
             if stmt.update is not None:
                 stmt.update = self._optimize_expr(stmt.update)
+            if self.opt_level >= 3:
+                self._clear_all_caches()
             self._optimize_stmt(stmt.body)
+            if self.opt_level >= 3:
+                self._clear_all_caches()
 
         elif isinstance(stmt, ast.SwitchStmt):
             stmt.expr = self._optimize_expr(stmt.expr)
@@ -332,6 +347,11 @@ class ASTOptimizer:
             unsigned = (self._is_effectively_unsigned(left) or
                         self._is_effectively_unsigned(right))
             is_long = left.is_long or right.is_long or mask >= 0xFFFFFFFF
+            is_long_long = (
+                getattr(left, 'is_long_long', False)
+                or getattr(right, 'is_long_long', False)
+                or mask > 0xFFFFFFFF
+            )
             result = self._fold_constants(op, left.value, right.value, unsigned, mask)
             if result is not None:
                 # Convert masked result back to signed representation so that
@@ -346,6 +366,7 @@ class ASTOptimizer:
                 return ast.IntLiteral(
                     value=result,
                     is_long=is_long,
+                    is_long_long=is_long_long,
                     is_unsigned=unsigned,
                     location=expr.location,
                 )
@@ -477,6 +498,7 @@ class ASTOptimizer:
                 return ast.IntLiteral(
                     value=result,
                     is_long=operand.is_long,
+                    is_long_long=getattr(operand, 'is_long_long', False),
                     is_unsigned=operand.is_unsigned,
                     location=expr.location,
                 )
@@ -547,15 +569,49 @@ class ASTOptimizer:
     # === Algebraic simplification helpers ===
 
     def _simplify_identity(self, expr: ast.BinaryOp) -> ast.Expression | None:
-        """Remove identity elements: x+0→x, x*1→x, etc."""
+        """Remove identity elements: x+0→x, x*1→x, etc.
+
+        Skip the simplification if dropping the literal would lose a
+        unsigned/long type promotion that the C standard would have
+        applied. e.g. `0U ^ x` has type `unsigned int` even when `x` is
+        `int` — replacing it with just `x` would silently change the
+        result type back to `int`, mis-driving downstream code paths
+        (sign-extension, comparison signedness, etc.).
+        """
         op = expr.op
         left = expr.left
         right = expr.right
 
-        l_zero = isinstance(left, ast.IntLiteral) and left.value == 0
-        r_zero = isinstance(right, ast.IntLiteral) and right.value == 0
-        l_one = isinstance(left, ast.IntLiteral) and left.value == 1
-        r_one = isinstance(right, ast.IntLiteral) and right.value == 1
+        # If the literal forces a wider/unsigned type via the usual
+        # arithmetic conversions, eliding it would change the type of
+        # the surrounding expression. Don't simplify in that case.
+        # `L` alone is fine on targets where `long` and `int` share width
+        # (the uc386 case); but `U` and `LL` change codegen. We're
+        # intentionally conservative here — the cost is one missed
+        # simplification, not a correctness bug.
+        def _literal_promotes(lit: ast.Expression, other: ast.Expression) -> bool:
+            if not isinstance(lit, ast.IntLiteral):
+                return False
+            if lit.is_unsigned or getattr(lit, 'is_long_long', False):
+                return True
+            return False
+
+        l_zero = (
+            isinstance(left, ast.IntLiteral) and left.value == 0
+            and not _literal_promotes(left, right)
+        )
+        r_zero = (
+            isinstance(right, ast.IntLiteral) and right.value == 0
+            and not _literal_promotes(right, left)
+        )
+        l_one = (
+            isinstance(left, ast.IntLiteral) and left.value == 1
+            and not _literal_promotes(left, right)
+        )
+        r_one = (
+            isinstance(right, ast.IntLiteral) and right.value == 1
+            and not _literal_promotes(right, left)
+        )
 
         result = None
         if op == "+":
@@ -575,8 +631,8 @@ class ASTOptimizer:
             if r_one:
                 result = left
         elif op == "%":
-            # x % 1 → 0
-            if r_one:
+            # x % 1 → 0  (only when x is side-effect-free)
+            if r_one and not self._expr_has_side_effects(left):
                 self._stat("identity")
                 self._changed = True
                 return ast.IntLiteral(value=0, location=expr.location)
@@ -603,33 +659,40 @@ class ASTOptimizer:
         return result
 
     def _simplify_zero(self, expr: ast.BinaryOp) -> ast.Expression | None:
-        """Simplify zero-producing operations: x*0→0, x&0→0, etc."""
+        """Simplify zero-producing operations: x*0→0, x&0→0, etc.
+
+        Only fires when the discarded (non-zero) operand is side-effect-free.
+        `0 % a++` must still increment a, so the simplification is unsafe
+        unless we can drop the other side without losing side effects.
+        """
         op = expr.op
         left = expr.left
         right = expr.right
 
         l_zero = isinstance(left, ast.IntLiteral) and left.value == 0
         r_zero = isinstance(right, ast.IntLiteral) and right.value == 0
+        l_pure = not self._expr_has_side_effects(left)
+        r_pure = not self._expr_has_side_effects(right)
 
         if op == "*":
-            if r_zero or l_zero:
+            if (r_zero and l_pure) or (l_zero and r_pure):
                 self._stat("zero_element")
                 self._changed = True
                 return ast.IntLiteral(value=0, location=expr.location)
         elif op == "&":
-            if r_zero or l_zero:
+            if (r_zero and l_pure) or (l_zero and r_pure):
                 self._stat("zero_element")
                 self._changed = True
                 return ast.IntLiteral(value=0, location=expr.location)
-        elif op == "/" and l_zero:
+        elif op == "/" and l_zero and r_pure:
             self._stat("zero_element")
             self._changed = True
             return ast.IntLiteral(value=0, location=expr.location)
-        elif op == "%" and l_zero:
+        elif op == "%" and l_zero and r_pure:
             self._stat("zero_element")
             self._changed = True
             return ast.IntLiteral(value=0, location=expr.location)
-        elif op in ("<<", ">>") and l_zero:
+        elif op in ("<<", ">>") and l_zero and r_pure:
             self._stat("zero_element")
             self._changed = True
             return ast.IntLiteral(value=0, location=expr.location)
@@ -1540,6 +1603,8 @@ class ASTOptimizer:
         long_mask = tc.ulong_max
         long_long_mask = tc.ulong_long_max
         val = lit.value
+        if getattr(lit, 'is_long_long', False):
+            return long_long_mask
         if lit.is_long:
             if val > tc.long_max or val < -(tc.long_max + 1):
                 return long_long_mask
