@@ -365,7 +365,9 @@ class Parser:
 
         # Parse inline member definitions if present
         members = []
+        had_brace = False
         if self._check(TokenType.LBRACE):
+            had_brace = True
             self._advance()  # consume {
             while not self._check(TokenType.RBRACE):
                 member_type = self._parse_type_specifier()
@@ -373,7 +375,10 @@ class Parser:
                     member_name, full_type = self._parse_declarator(member_type)
                     bit_width = None
                     if self._match(TokenType.COLON):
-                        bit_width = self._parse_expression()
+                        # Bit-width is a constant expression — must NOT
+                        # consume the comma operator since `i : 6, j : 11`
+                        # uses comma to separate sibling declarators.
+                        bit_width = self._parse_assignment_expression()
                     # Skip trailing __attribute__ on the declarator
                     # (e.g. `int x __attribute__((packed))`).
                     self._skip_noise()
@@ -386,7 +391,12 @@ class Parser:
             # Skip __attribute__ after closing brace
             self._skip_noise()
 
-        return ast.StructType(name=name, is_union=is_union, members=members, location=loc)
+        struct_type = ast.StructType(name=name, is_union=is_union,
+                                     members=members, location=loc)
+        # Annotate so downstream code can tell `struct foo {};` (a
+        # definition with no members) from `struct foo;` (a forward).
+        struct_type._had_inline_brace = had_brace
+        return struct_type
 
     def _parse_enum_type(self) -> ast.EnumType:
         """Parse enum type, including inline value definitions."""
@@ -1460,8 +1470,14 @@ class Parser:
             else:
                 break
 
-        # Handle struct/enum definitions where members were already parsed inline
-        if isinstance(base_type, ast.StructType) and base_type.members:
+        # Handle struct/enum definitions where members were already parsed inline.
+        # Empty `struct foo {};` counts as a definition too — distinguished by
+        # `_had_inline_brace`, since `members` alone can't tell it from the
+        # forward `struct foo;`.
+        if (
+            isinstance(base_type, ast.StructType)
+            and (base_type.members or getattr(base_type, "_had_inline_brace", False))
+        ):
             if self._check(TokenType.SEMICOLON):
                 # Bare struct definition: struct Point { ... };
                 self._advance()  # consume semicolon
