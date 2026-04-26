@@ -1543,6 +1543,8 @@ class Parser:
             # backend can evaluate it for side effects (e.g. asm("" :
             # "+r" (*bar())) needs bar() to actually run).
             operands: list = []
+            outputs: list = []
+            inputs: list = []
             group_idx = 0
             # Helper: consume a `:` or expand `::` into two consecutive
             # group separators.
@@ -1595,12 +1597,18 @@ class Parser:
                             self._advance()
                         self._expect(TokenType.RBRACKET)
                     # Constraint string.
+                    constraint = ""
                     if self._check(TokenType.STRING_LITERAL):
+                        constraint = self._current().value
                         self._advance()
                     # The expression.
                     if self._match(TokenType.LPAREN):
                         op_expr = self._parse_assignment_expression()
                         operands.append(op_expr)
+                        if group_idx == 0:
+                            outputs.append((constraint, op_expr))
+                        elif group_idx == 1:
+                            inputs.append((constraint, op_expr))
                         self._expect(TokenType.RPAREN)
                     if not self._match(TokenType.COMMA):
                         break
@@ -1609,7 +1617,10 @@ class Parser:
             # Optional trailing semicolon (declaration-style asm doesn't
             # require one, but statement-style usually does).
             self._match(TokenType.SEMICOLON)
-            return ast.AsmStmt(template=template, operands=operands, location=loc)
+            return ast.AsmStmt(
+                template=template, operands=operands,
+                outputs=outputs, inputs=inputs, location=loc,
+            )
 
         # Case/default labels (in switch)
         if self._match(TokenType.CASE):

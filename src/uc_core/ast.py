@@ -373,10 +373,16 @@ class AsmStmt(Statement):
     at least evaluate them for side effects (which gcc semantics
     require — the constraints define register/memory binding, but
     the expression itself still executes per call site).
+
+    `outputs` and `inputs` carry `(constraint, expr)` pairs so a
+    backend that wants to honor simple asm idioms (`asm("" : "=r"(o)
+    : "0"(i))` ≡ `o = i`) has the constraint metadata available.
     """
     template: str = ""
     is_volatile: bool = False
     operands: list = field(default_factory=list)
+    outputs: list = field(default_factory=list)
+    inputs: list = field(default_factory=list)
 
 
 # === Declaration Nodes ===
