@@ -520,16 +520,22 @@ class Parser:
             is_const=is_const, is_volatile=is_volatile, location=loc,
         )
 
-    def _apply_pending_vector_size(self, ty):
+    def _apply_pending_vector_size(self, ty, *, consume=True):
         """If `_skip_gcc_attribute` saw a `vector_size(N)`, wrap `ty`
         as an ArrayType of N/elem_size elements. We treat vectors as
         arrays for storage/init/indexing; per-element arithmetic
         isn't auto-componentwise.
+
+        Set `consume=False` to leave the pending size in place for a
+        later call to consume — useful when the same vector_size attr
+        applies to multiple declarators (`__attribute__((vector_size(N)))
+        T x, y`).
         """
         if self._pending_vector_size is None:
             return ty
         sz = self._pending_vector_size
-        self._pending_vector_size = None
+        if consume:
+            self._pending_vector_size = None
         # Find the leaf BasicType to get its size.
         leaf = ty
         while isinstance(leaf, (ast.PointerType, ast.ArrayType)):
@@ -1794,10 +1800,14 @@ class Parser:
             if self._peek(1).type != TokenType.COLON:
                 return True
         # GCC `__extension__` and friends — declaration noise that must
-        # be peeked through to see if a declaration follows.
+        # be peeked through to see if a declaration follows. Also handles
+        # `__attribute__((...))` leading a local decl.
         if (
             self._check(TokenType.IDENTIFIER)
-            and self._current().value in self._DOS_IGNORED_IDENTS
+            and (
+                self._current().value in self._DOS_IGNORED_IDENTS
+                or self._current().value in ("__attribute__", "__attribute")
+            )
         ):
             saved = self.pos
             self._skip_noise()
@@ -1982,7 +1992,13 @@ class Parser:
                 self._expect(TokenType.SEMICOLON)
                 return ast.TypedefDecl(name=first_name, target_type=base_type, location=loc)
 
-        # Declarators
+        # Declarators. If a leading `__attribute__((vector_size(N)))`
+        # set `_pending_vector_size`, we want it applied to base_type
+        # before parsing declarators — and persistently so subsequent
+        # declarators in the same `T x, y;` decl all get the vector
+        # type. Snapshot here.
+        if self._pending_vector_size is not None:
+            base_type = self._apply_pending_vector_size(base_type)
         declarations = []
         first = True
         while first or self._match(TokenType.COMMA):
