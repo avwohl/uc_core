@@ -193,6 +193,8 @@ KEYWORDS = {
     'bool': TokenType.BOOL,
     '_Bool': TokenType.BOOL,
     '_Complex': TokenType.COMPLEX,
+    '__complex__': TokenType.COMPLEX,
+    '__complex': TokenType.COMPLEX,
     '_Decimal128': TokenType.DECIMAL128,
     '_Decimal32': TokenType.DECIMAL32,
     '_Decimal64': TokenType.DECIMAL64,
