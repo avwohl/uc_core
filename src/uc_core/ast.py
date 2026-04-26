@@ -101,6 +101,7 @@ class FloatLiteral(Expression):
     """Floating-point literal."""
     value: float
     is_float: bool = False  # True if 'f'/'F' suffixed (type float), False = type double
+    is_imaginary: bool = False  # True if 'i'/'I' suffixed (gcc extension)
 
 
 @dataclass(kw_only=True)

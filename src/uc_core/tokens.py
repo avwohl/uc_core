@@ -140,6 +140,8 @@ KEYWORDS = {
     'case': TokenType.CASE,
     'char': TokenType.CHAR,
     'const': TokenType.CONST,
+    '__const': TokenType.CONST,
+    '__const__': TokenType.CONST,
     'constexpr': TokenType.CONSTEXPR,
     'continue': TokenType.CONTINUE,
     'default': TokenType.DEFAULT,

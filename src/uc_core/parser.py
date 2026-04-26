@@ -1051,8 +1051,15 @@ class Parser:
                                   is_hex=is_hex, location=loc)
         if self._check(TokenType.FLOAT_LITERAL):
             tok = self._advance()
-            fval, has_f = tok.value if isinstance(tok.value, tuple) else (tok.value, False)
-            return ast.FloatLiteral(value=fval, is_float=has_f, location=loc)
+            v = tok.value
+            if isinstance(v, tuple):
+                fval = v[0]
+                has_f = v[1] if len(v) > 1 else False
+                has_i = v[2] if len(v) > 2 else False
+            else:
+                fval, has_f, has_i = v, False, False
+            return ast.FloatLiteral(value=fval, is_float=has_f,
+                                    is_imaginary=has_i, location=loc)
         if self._check(TokenType.CHAR_LITERAL) or self._check(TokenType.WIDE_CHAR_LITERAL):
             return ast.CharLiteral(value=self._advance().value, location=loc)
         if self._check(TokenType.STRING_LITERAL) or self._check(TokenType.WIDE_STRING_LITERAL):
