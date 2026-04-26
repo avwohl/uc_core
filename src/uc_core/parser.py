@@ -65,6 +65,10 @@ class Parser:
         '_loadds', '__loadds',
         '_saveregs', '__saveregs',
         '_export', '__export',
+        # GCC `__extension__` keyword — wraps a non-standard expression
+        # or declaration to suppress -pedantic warnings. We accept and
+        # ignore it.
+        '__extension__',
     })
 
     # DOS-era specifiers that take a parenthesized argument to be skipped.
@@ -643,6 +647,11 @@ class Parser:
     def _parse_kr_declarations(self, params: list[ast.ParamDecl]) -> None:
         """Parse K&R-style parameter declarations and update param types."""
         while not self._check(TokenType.LBRACE) and not self._check(TokenType.EOF):
+            # K&R param decls can prepend `register` (and other storage
+            # classes, though only register is meaningful here).
+            self._match(TokenType.REGISTER)
+            self._match(TokenType.AUTO)
+            self._skip_noise()
             base_type = self._parse_type_specifier()
             # Parse one or more declarators
             first = True
@@ -1512,6 +1521,7 @@ class Parser:
                     self.typedefs[name] = full_type
                     if first_name is None:
                         first_name = name
+                    self._skip_noise()
                     if self._match(TokenType.COMMA):
                         continue
                     break
@@ -1532,6 +1542,9 @@ class Parser:
                     self.typedefs[name] = full_type
                     if first_name is None:
                         first_name = name
+                    # Skip trailing __attribute__ on the typedef name
+                    # (e.g. `typedef struct {...} T __attribute__((..));`).
+                    self._skip_noise()
                     if self._match(TokenType.COMMA):
                         continue
                     break
