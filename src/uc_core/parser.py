@@ -91,6 +91,10 @@ class Parser:
         # / type captures it. We track the largest N seen so multiple
         # `aligned` attributes accumulate to the strongest constraint.
         self._pending_alignment: int | None = None
+        # `__attribute__((alias("name")))` recognized in `_skip_gcc_attribute`
+        # — the next declarator becomes a NASM-level alias for `name`.
+        # Cleared after each VarDecl/FunctionDecl consumes it.
+        self._pending_alias: str | None = None
 
     def _current(self) -> Token:
         """Get current token."""
@@ -164,6 +168,20 @@ class Parser:
                             n = self._read_vector_size_arg()
                             if n is not None:
                                 self._pending_vector_size = n
+                            continue
+                        if (
+                            self._check(TokenType.IDENTIFIER)
+                            and self._current().value in (
+                                "alias", "__alias__",
+                            )
+                        ):
+                            self._advance()  # alias
+                            if self._match(TokenType.LPAREN):
+                                if self._check(TokenType.STRING_LITERAL):
+                                    self._pending_alias = self._current().value
+                                    self._advance()
+                                while not self._check(TokenType.EOF) and not self._match(TokenType.RPAREN):
+                                    self._advance()
                             continue
                         if (
                             self._check(TokenType.IDENTIFIER)
@@ -1256,12 +1274,28 @@ class Parser:
                 self.pos = saved_pos
             return ast.SizeofExpr(expr=self._parse_unary(), location=loc)
 
-        # alignof
+        # alignof — both `__alignof__(T)` (type name) and `__alignof__(expr)`
+        # forms supported. Reuse SizeofType with is_alignof=True for the
+        # type form; reuse SizeofExpr (also flagged) for the expression
+        # form.
         if self._match(TokenType.ALIGNOF):
-            self._expect(TokenType.LPAREN)
-            target_type = self._parse_type_name()
-            self._expect(TokenType.RPAREN)
-            return ast.SizeofType(target_type=target_type, location=loc)  # Reuse SizeofType
+            if self._check(TokenType.LPAREN):
+                saved_pos = self.pos
+                self._advance()  # (
+                if self._is_type_name():
+                    target_type = self._parse_type_name()
+                    self._expect(TokenType.RPAREN)
+                    return ast.SizeofType(
+                        target_type=target_type,
+                        is_alignof=True,
+                        location=loc,
+                    )
+                self.pos = saved_pos
+            return ast.SizeofExpr(
+                expr=self._parse_unary(),
+                is_alignof=True,
+                location=loc,
+            )
 
         return self._parse_postfix()
 
@@ -2094,6 +2128,8 @@ class Parser:
             # `_skip_noise` saw, so it lands on this declarator only.
             decl_align = self._pending_alignment
             self._pending_alignment = None
+            decl_alias = self._pending_alias
+            self._pending_alias = None
             # Variable or typedef
             init = None
             if self._match(TokenType.ASSIGN):
@@ -2107,6 +2143,7 @@ class Parser:
                     name=name, var_type=full_type, init=init,
                     storage_class=storage_class,
                     alignment=decl_align,
+                    alias_target=decl_alias,
                     location=loc,
                 ))
 

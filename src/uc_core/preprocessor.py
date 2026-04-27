@@ -828,15 +828,15 @@ class Preprocessor:
         return expr
 
     def _expand_macros(self, text: str) -> str:
-        """Expand all macros in text."""
-        # Keep expanding until no more changes
-        max_iterations = 100
-        for _ in range(max_iterations):
-            new_text = self._expand_macros_once(text)
-            if new_text == text:
-                break
-            text = new_text
-        return text
+        """Expand all macros in text.
+
+        Single pass — `_expand_macros_once` already recurses into
+        function-like and object-like macro bodies (with the macro name
+        in `self.expanding`), so further passes only re-expand macros
+        whose names appear in the result. That breaks self-referential
+        idioms like `#define check(t) check(QUOTE(t), ...)`.
+        """
+        return self._expand_macros_once(text)
 
     def _expand_macros_once(self, text: str) -> str:
         """Single pass of macro expansion."""
@@ -859,6 +859,33 @@ class Preprocessor:
                 result.append(text[i:j])
                 i = j
                 continue
+
+            # Skip /* … */ block comments and // line comments. Macros
+            # named inside a comment must NOT be expanded — otherwise an
+            # expansion that itself contains `*/` would corrupt the
+            # surrounding comment (e.g. `SIG_ERR` defined as
+            # `((sig_handler_t)-1) /* err */` invoked inside another
+            # comment).
+            if text[i] == '/' and i + 1 < len(text):
+                nxt = text[i + 1]
+                if nxt == '*':
+                    j = text.find('*/', i + 2)
+                    if j < 0:
+                        result.append(text[i:])
+                        i = len(text)
+                    else:
+                        result.append(text[i:j + 2])
+                        i = j + 2
+                    continue
+                if nxt == '/':
+                    j = text.find('\n', i + 2)
+                    if j < 0:
+                        result.append(text[i:])
+                        i = len(text)
+                    else:
+                        result.append(text[i:j])
+                        i = j
+                    continue
 
             # Look for identifier
             match = re.match(r'[a-zA-Z_]\w*', text[i:])
@@ -993,9 +1020,16 @@ class Preprocessor:
                 expanded_args.append(arg)
         # Regular parameter substitution
         for param, arg in zip(macro.params, expanded_args):
-            # Replace parameter with argument (word boundary)
+            # Replace parameter with argument (word boundary).
+            # Negative lookahead skips when the identifier is followed by `'`
+            # or `"` — that would form a wide-char/string-literal prefix (e.g.
+            # `L'1'` is a single token; substituting `L`'s arg would break it).
             # Use lambda to prevent re.sub from interpreting escape sequences in arg
-            body = re.sub(rf'\b{re.escape(param)}\b', lambda m, a=arg: a, body)
+            body = re.sub(
+                rf'\b{re.escape(param)}\b(?![\'"])',
+                lambda m, a=arg: a,
+                body,
+            )
 
         # Mark macro as being expanded to prevent recursion
         self.expanding.add(macro.name)

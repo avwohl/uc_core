@@ -192,14 +192,19 @@ class Cast(Expression):
 
 @dataclass(kw_only=True)
 class SizeofExpr(Expression):
-    """sizeof with expression."""
+    """sizeof with expression. `is_alignof=True` means
+    `__alignof__(expr)` — same shape, but lowers to alignment of the
+    expression's type."""
     expr: Expression
+    is_alignof: bool = False
 
 
 @dataclass(kw_only=True)
 class SizeofType(Expression):
-    """sizeof with type."""
+    """sizeof with type. `is_alignof=True` means `__alignof__(T)` —
+    same AST shape (operand is a type), but lowers to alignment."""
     target_type: TypeNode
+    is_alignof: bool = False
 
 
 @dataclass(kw_only=True)
@@ -403,6 +408,7 @@ class VarDecl(Declaration):
     init: Optional[Expression] = None
     storage_class: Optional[str] = None  # "static", "extern", "register", "auto"
     alignment: Optional[int] = None  # __attribute__((aligned(N)))
+    alias_target: Optional[str] = None  # __attribute__((alias("other")))
 
 
 @dataclass(kw_only=True)
