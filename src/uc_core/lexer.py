@@ -288,7 +288,7 @@ class Lexer:
         self._advance()  # opening '
 
         if self._peek() == '\\':
-            value = self._read_escape_sequence()
+            value = self._read_escape_sequence(wide=wide)
         elif self._peek() == "'":
             raise LexerError("Empty character literal", loc)
         elif self._peek() == '\0' or self._peek() == '\n':
@@ -313,7 +313,7 @@ class Lexer:
             if self._peek() == '\0' or self._peek() == '\n':
                 raise LexerError("Unterminated string literal", loc)
             if self._peek() == '\\':
-                result.append(chr(self._read_escape_sequence()))
+                result.append(chr(self._read_escape_sequence(wide=wide)))
             else:
                 result.append(self._advance())
 
@@ -321,8 +321,13 @@ class Lexer:
         tok_type = TokenType.WIDE_STRING_LITERAL if wide else TokenType.STRING_LITERAL
         return Token(tok_type, ''.join(result), loc)
 
-    def _read_escape_sequence(self) -> int:
-        """Read an escape sequence and return its value."""
+    def _read_escape_sequence(self, wide: bool = False) -> int:
+        """Read an escape sequence and return its value.
+
+        For wide char/string literals, octal/hex escapes keep their
+        full value (`L'\\400'` is 256). Narrow literals truncate to
+        a byte to match the C semantics of `char`-typed literals.
+        """
         loc = self._location()
         self._advance()  # backslash
 
@@ -340,7 +345,7 @@ class Lexer:
             while self._is_octal_digit(self._peek()) and count < 3:
                 value = value * 8 + int(self._advance())
                 count += 1
-            return value & 0xFF
+            return value if wide else value & 0xFF
         elif ch == 'x':
             # Hex escape
             value = 0
@@ -352,7 +357,7 @@ class Lexer:
                     value = value * 16 + int(digit)
                 else:
                     value = value * 16 + (ord(digit) - ord('a') + 10)
-            return value & 0xFF
+            return value if wide else value & 0xFF
         elif ch == '\\':
             return ord('\\')
         elif ch == "'":
