@@ -830,13 +830,24 @@ class Preprocessor:
     def _expand_macros(self, text: str) -> str:
         """Expand all macros in text.
 
-        Single pass — `_expand_macros_once` already recurses into
-        function-like and object-like macro bodies (with the macro name
-        in `self.expanding`), so further passes only re-expand macros
-        whose names appear in the result. That breaks self-referential
-        idioms like `#define check(t) check(QUOTE(t), ...)`.
+        Multi-pass with blue-painting: each expansion of a function-
+        like macro X marks any X mentions in its result with sentinel
+        characters (`\\x01X\\x02`) so the rescan doesn't re-expand X
+        itself. This handles self-referential macros like
+        `#define check(t) check(QUOTE(t), ...)` while still allowing
+        the standard "rescan picks up new macro names" rule (e.g.
+        `CAT(A,B)(x)` where the paste produces `AB` and `AB(x)` then
+        expands).
         """
-        return self._expand_macros_once(text)
+        max_iterations = 100
+        for _ in range(max_iterations):
+            new_text = self._expand_macros_once(text)
+            if new_text == text:
+                break
+            text = new_text
+        # Strip sentinels at the end so downstream consumers see the
+        # macro name verbatim.
+        return text.replace("\x01", "").replace("\x02", "")
 
     def _expand_macros_once(self, text: str) -> str:
         """Single pass of macro expansion."""
@@ -844,6 +855,18 @@ class Preprocessor:
         i = 0
 
         while i < len(text):
+            # Skip blue-paint sentinels: `\x01<name>\x02` is a previously-
+            # expanded macro mention; emit the name verbatim and don't
+            # re-scan it.
+            if text[i] == '\x01':
+                j = text.find('\x02', i + 1)
+                if j < 0:
+                    result.append(text[i:])
+                    i = len(text)
+                else:
+                    result.append(text[i:j + 1])
+                    i = j + 1
+                continue
             # Skip strings and character literals
             if text[i] in '"\'':
                 quote = text[i]
@@ -1063,6 +1086,15 @@ class Preprocessor:
         result = self._expand_macros(body)
         self.expanding.discard(macro.name)
 
+        # Blue-paint any remaining mentions of `macro.name` in the
+        # result so the outer rescan doesn't re-expand them. Skip
+        # mentions already inside an existing sentinel pair (defensive).
+        if macro.name in result:
+            result = re.sub(
+                rf'\b{re.escape(macro.name)}\b',
+                f'\x01{macro.name}\x02',
+                result,
+            )
         return result
 
     def _handle_stringification(self, body: str, params: list[str], args: list[str]) -> str:
