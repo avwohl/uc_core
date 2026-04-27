@@ -432,6 +432,7 @@ class FunctionDecl(Declaration):
     is_variadic: bool = False
     storage_class: Optional[str] = None
     is_inline: bool = False
+    alignment: Optional[int] = None  # __attribute__((aligned(N)))
 
 
 @dataclass(kw_only=True)

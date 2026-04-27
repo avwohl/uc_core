@@ -887,6 +887,33 @@ class Preprocessor:
                         i = j
                     continue
 
+            # Recognize number tokens (including suffixes) as a unit so a
+            # macro named `F` doesn't mangle `0.0F` into `0.0140`. C99
+            # pp-numbers: digit (or `.` digit) followed by any sequence
+            # of digits, letters, `_`, `.`, or sign-bearing exponent
+            # (`e+10`, `p-3`).
+            if (
+                text[i].isdigit()
+                or (
+                    text[i] == '.'
+                    and i + 1 < len(text)
+                    and text[i + 1].isdigit()
+                )
+            ):
+                j = i + 1
+                while j < len(text):
+                    c = text[j]
+                    if c.isalnum() or c == '_' or c == '.':
+                        j += 1
+                    elif c in '+-' and j > 0 and text[j - 1] in 'eEpP':
+                        # Exponent sign (e+10 / p-3).
+                        j += 1
+                    else:
+                        break
+                result.append(text[i:j])
+                i = j
+                continue
+
             # Look for identifier
             match = re.match(r'[a-zA-Z_]\w*', text[i:])
             if match:
