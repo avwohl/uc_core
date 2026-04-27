@@ -439,6 +439,7 @@ class StructMember(Node):
     name: Optional[str]  # None for anonymous
     member_type: TypeNode
     bit_width: Optional[Expression] = None
+    alignment: Optional[int] = None  # __attribute__((aligned(N)))
 
 
 @dataclass(kw_only=True)

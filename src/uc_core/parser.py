@@ -616,7 +616,20 @@ class Parser:
             had_brace = True
             self._advance()  # consume {
             while not self._check(TokenType.RBRACE):
+                # `_pending_alignment` may be set by a leading
+                # `__attribute__((aligned(N)))` between member specifier
+                # and type, e.g. `int __attribute__((aligned(8))) a;`.
+                # Capture it before parse_type_specifier resets state.
+                self._skip_noise()
+                leading_align = self._pending_alignment
+                self._pending_alignment = None
                 member_type = self._parse_type_specifier()
+                # If the alignment came AFTER the type specifier, the
+                # type-spec's _skip_noise inside it may have consumed
+                # it; check pending again.
+                if self._pending_alignment is not None and leading_align is None:
+                    leading_align = self._pending_alignment
+                    self._pending_alignment = None
                 while True:
                     member_name, full_type = self._parse_declarator(member_type)
                     bit_width = None
@@ -628,8 +641,18 @@ class Parser:
                     # Skip trailing __attribute__ on the declarator
                     # (e.g. `int x __attribute__((packed))`).
                     self._skip_noise()
-                    members.append(ast.StructMember(name=member_name if member_name else None,
-                                                    member_type=full_type, bit_width=bit_width))
+                    # Combine leading and trailing aligned attributes.
+                    member_align = leading_align
+                    if self._pending_alignment is not None:
+                        ta = self._pending_alignment
+                        self._pending_alignment = None
+                        if member_align is None or ta > member_align:
+                            member_align = ta
+                    members.append(ast.StructMember(
+                        name=member_name if member_name else None,
+                        member_type=full_type, bit_width=bit_width,
+                        alignment=member_align,
+                    ))
                     if not self._match(TokenType.COMMA):
                         break
                 self._expect(TokenType.SEMICOLON)
