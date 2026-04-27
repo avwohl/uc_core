@@ -402,6 +402,7 @@ class VarDecl(Declaration):
     var_type: TypeNode
     init: Optional[Expression] = None
     storage_class: Optional[str] = None  # "static", "extern", "register", "auto"
+    alignment: Optional[int] = None  # __attribute__((aligned(N)))
 
 
 @dataclass(kw_only=True)

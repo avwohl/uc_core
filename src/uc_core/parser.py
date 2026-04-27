@@ -86,6 +86,11 @@ class Parser:
         # `vector_size(N)`. The next type-specifier consumes it and
         # wraps its base type in an ArrayType of the right shape.
         self._pending_vector_size: int | None = None
+        # Set transiently by `_skip_gcc_attribute` when it sees
+        # `aligned(N)` (or bare `aligned`). The next declaration
+        # / type captures it. We track the largest N seen so multiple
+        # `aligned` attributes accumulate to the strongest constraint.
+        self._pending_alignment: int | None = None
 
     def _current(self) -> Token:
         """Get current token."""
@@ -159,6 +164,36 @@ class Parser:
                             n = self._read_vector_size_arg()
                             if n is not None:
                                 self._pending_vector_size = n
+                            continue
+                        if (
+                            self._check(TokenType.IDENTIFIER)
+                            and self._current().value in (
+                                "aligned", "__aligned__",
+                            )
+                        ):
+                            self._advance()  # aligned
+                            # Optional `(N)` argument; bare `aligned`
+                            # means "natural maximum" — we treat it
+                            # as 16 (a reasonable default for i386).
+                            n = 16
+                            if self._match(TokenType.LPAREN):
+                                # Read tokens up to matching `)`.
+                                start = self.pos
+                                pdepth = 1
+                                while pdepth > 0 and not self._check(TokenType.EOF):
+                                    if self._match(TokenType.LPAREN):
+                                        pdepth += 1
+                                    elif self._match(TokenType.RPAREN):
+                                        pdepth -= 1
+                                    else:
+                                        self._advance()
+                                inner = self.tokens[start:self.pos - 1]
+                                v = self._fold_vector_size_tokens(inner)
+                                if v is not None:
+                                    n = v
+                            if (self._pending_alignment is None
+                                    or n > self._pending_alignment):
+                                self._pending_alignment = n
                             continue
                         if self._match(TokenType.LPAREN):
                             depth += 1
@@ -2032,6 +2067,10 @@ class Parser:
             # `typedef int V __attribute__((vector_size(16)));`.
             self._skip_noise()
             full_type = self._apply_pending_vector_size(full_type)
+            # Capture and clear any `aligned(N)` attribute that
+            # `_skip_noise` saw, so it lands on this declarator only.
+            decl_align = self._pending_alignment
+            self._pending_alignment = None
             # Variable or typedef
             init = None
             if self._match(TokenType.ASSIGN):
@@ -2041,8 +2080,12 @@ class Parser:
                 self.typedefs[name] = full_type
                 declarations.append(ast.TypedefDecl(name=name, target_type=full_type, location=loc))
             else:
-                declarations.append(ast.VarDecl(name=name, var_type=full_type,
-                                                init=init, storage_class=storage_class, location=loc))
+                declarations.append(ast.VarDecl(
+                    name=name, var_type=full_type, init=init,
+                    storage_class=storage_class,
+                    alignment=decl_align,
+                    location=loc,
+                ))
 
         self._expect(TokenType.SEMICOLON)
 
