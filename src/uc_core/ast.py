@@ -416,6 +416,10 @@ class ParamDecl(Declaration):
     """Function parameter declaration."""
     name: Optional[str]  # Can be None in prototypes
     param_type: TypeNode
+    # For VLA-shaped parameters (`int b[a++]`), the size expression is
+    # evaluated at function entry for its side effects per C99. Held
+    # here as a list of expressions, in declarator order.
+    size_side_effects: Optional[list[Expression]] = None
 
 
 @dataclass(kw_only=True)

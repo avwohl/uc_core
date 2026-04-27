@@ -970,6 +970,19 @@ class Parser:
         # Skip trailing __attribute__ — `int x __attribute__((unused))`
         # is common in test source.
         self._skip_noise()
+        # Capture VLA size expressions before the array-to-pointer
+        # adjustment so the codegen can evaluate them at function entry
+        # for their side effects (`int b[a++]` per C99).
+        size_side_effects: list[ast.Expression] = []
+        walk = full_type
+        while isinstance(walk, ast.ArrayType):
+            if (
+                walk.size is not None
+                and not isinstance(walk.size, ast.IntLiteral)
+                and not getattr(full_type, "is_vector", False)
+            ):
+                size_side_effects.append(walk.size)
+            walk = walk.base_type
         # C11 6.7.6.3p7: Array parameters are adjusted to pointer type.
         # Vectors (GCC vector_size) are passed by value and keep their
         # ArrayType so the callee can address per-element.
@@ -981,7 +994,12 @@ class Parser:
         # C11 6.7.6.3p8: Function parameters are adjusted to pointer-to-function
         elif isinstance(full_type, ast.FunctionType):
             full_type = ast.PointerType(base_type=full_type)
-        return ast.ParamDecl(name=name if name else None, param_type=full_type, location=loc)
+        return ast.ParamDecl(
+            name=name if name else None,
+            param_type=full_type,
+            size_side_effects=size_side_effects or None,
+            location=loc,
+        )
 
     def _parse_type_name(self) -> ast.TypeNode:
         """Parse a type name (for casts, sizeof)."""
