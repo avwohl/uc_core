@@ -313,6 +313,11 @@ class ASTOptimizer:
         elif isinstance(expr, ast.SizeofExpr):
             # sizeof(string_literal) → array length including null terminator
             if isinstance(expr.expr, ast.StringLiteral):
+                # Wide strings have wchar_t-sized elements, not bytes.
+                # We don't track wchar_t size in TypeConfig; skip the
+                # fold so codegen can handle it via the live type_of.
+                if getattr(expr.expr, "is_wide", False):
+                    return expr
                 self._stat("sizeof_fold")
                 self._changed = True
                 return ast.IntLiteral(value=len(expr.expr.value) + 1, location=expr.location)
