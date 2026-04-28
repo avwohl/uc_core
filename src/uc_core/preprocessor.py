@@ -1113,6 +1113,22 @@ class Preprocessor:
         # Build param->arg mapping
         param_map = dict(zip(params, args))
 
+        # GCC extension: `, ## __VA_ARGS__` swallows the comma when
+        # __VA_ARGS__ expands to empty (no variadic args were passed).
+        # Same rule applies to a generic empty parameter — `, ## x`
+        # with x empty drops the comma. Apply this BEFORE the regular
+        # paste loop so we don't end up with stray `,` + empty-token
+        # pairs.
+        empty_paste_pat = re.compile(
+            rf',\s*##\s*([a-zA-Z_][a-zA-Z0-9_]*)'
+        )
+        def _swallow_comma(m: 're.Match') -> str:
+            param_name = m.group(1)
+            if param_name in param_map and param_map[param_name] == '':
+                return ''
+            return m.group(0)
+        body = empty_paste_pat.sub(_swallow_comma, body)
+
         # Process ## operators from left to right
         # Token pattern: identifier or single punctuator
         token_pat = r'([a-zA-Z_][a-zA-Z0-9_]*|[^\s])'

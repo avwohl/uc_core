@@ -363,6 +363,18 @@ class Parser:
         }
         return TABLE.get(joined)
 
+    # Subset of `_DOS_IGNORED_IDENTS` that are short, lowercase,
+    # un-prefixed names commonly used as ordinary C identifiers
+    # (variable / member names) in modern code. We apply lookahead
+    # discrimination to these — only treat them as a specifier if
+    # followed by a token that fits a declarator-prefix context.
+    # Prefixed forms (`__cdecl`, `__extension__`, etc.) are clearly
+    # compiler-specific and unlikely to be variable names; we always
+    # consume those.
+    _DOS_AMBIGUOUS_IDENTS = frozenset({
+        'near', 'far', 'huge',
+    })
+
     def _skip_dos_specifiers(self) -> None:
         """Skip DOS-era non-standard specifiers (near/far/huge, __cdecl,
         __interrupt, __based(seg), etc.).
@@ -371,10 +383,32 @@ class Parser:
         uc_core accepts and discards them; target backends that care
         (16-bit) can reintroduce real semantics. In flat-32 (uc386) and
         Z80 (uc80) targets they are all no-ops.
+
+        Care: a few of these tokens (`near`, `far`, `huge`) are also
+        valid C identifier names. For those, peek ahead — if the next
+        token doesn't continue a declarator-prefix context, treat the
+        IDENT as the actual declarator name and stop.
         """
+        # Tokens that can validly follow a DOS specifier in real-world
+        # period code — another specifier IDENT, a `*` modifier, a
+        # type keyword/qualifier, storage class, or function specifier.
+        _SPEC_FOLLOW = {
+            TokenType.IDENTIFIER, TokenType.STAR,
+            TokenType.CONST, TokenType.VOLATILE, TokenType.RESTRICT,
+        }
         while self._check(TokenType.IDENTIFIER):
             value = self._current().value
             if value in self._DOS_IGNORED_IDENTS:
+                if value in self._DOS_AMBIGUOUS_IDENTS:
+                    # Ambiguous: could be a variable name. Lookahead.
+                    nxt = self._peek(1)
+                    if (
+                        nxt.type not in _SPEC_FOLLOW
+                        and nxt.type not in self.TYPE_SPECIFIERS
+                        and nxt.type not in self.STORAGE_CLASSES
+                        and nxt.type not in self.FUNCTION_SPECIFIERS
+                    ):
+                        break
                 self._advance()
             elif value in self._DOS_PAREN_IDENTS:
                 self._advance()

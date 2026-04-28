@@ -186,6 +186,8 @@ KEYWORDS = {
     # 'true' is NOT a C keyword - it's a macro in <stdbool.h>
     'typedef': TokenType.TYPEDEF,
     'typeof': TokenType.TYPEOF,
+    '__typeof__': TokenType.TYPEOF,
+    '__typeof': TokenType.TYPEOF,
     'typeof_unqual': TokenType.TYPEOF_UNQUAL,
     'union': TokenType.UNION,
     'unsigned': TokenType.UNSIGNED,
