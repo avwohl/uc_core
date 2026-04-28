@@ -2081,6 +2081,9 @@ class Parser:
         if (
             self._check(TokenType.IDENTIFIER)
             and self._current().value not in self.typedefs
+            and self._current().value not in (
+                "__int128", "__int128_t", "__uint128_t",
+            )
         ):
             saved_pos = self.pos
             self._advance()
