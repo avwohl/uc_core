@@ -60,6 +60,7 @@ class StructType(TypeNode):
     members: list['StructMember'] = field(default_factory=list)  # For inline definitions
     is_const: bool = False
     is_volatile: bool = False
+    is_packed: bool = False  # __attribute__((packed)): no padding between members
 
 
 @dataclass(kw_only=True)
@@ -445,6 +446,7 @@ class StructDecl(Declaration):
     members: list['StructMember'] = field(default_factory=list)
     is_union: bool = False
     is_definition: bool = False  # True if members are defined
+    is_packed: bool = False  # __attribute__((packed))
 
 
 @dataclass(kw_only=True)

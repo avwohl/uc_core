@@ -103,6 +103,10 @@ class Parser:
         # `__attribute__((noinit))` — marks an uninitialized global as
         # NOT zeroed at startup. Cleared after each VarDecl consumes it.
         self._pending_noinit: bool = False
+        # `__attribute__((packed))` on a struct — captured by the
+        # struct-type parser and stored on StructType.is_packed.
+        # Cleared after each consumer reads it.
+        self._pending_packed: bool = False
 
     def _current(self) -> Token:
         """Get current token."""
@@ -209,6 +213,15 @@ class Parser:
                         ):
                             self._advance()
                             self._pending_noinit = True
+                            continue
+                        if (
+                            self._check(TokenType.IDENTIFIER)
+                            and self._current().value in (
+                                "packed", "__packed__",
+                            )
+                        ):
+                            self._advance()  # packed
+                            self._pending_packed = True
                             continue
                         if (
                             self._check(TokenType.IDENTIFIER)
@@ -682,15 +695,21 @@ class Parser:
         if not is_union:
             self._expect(TokenType.STRUCT)
 
-        # Skip __attribute__ before name
+        # Skip __attribute__ before name (may set _pending_packed)
+        self._pending_packed = False
         self._skip_noise()
+        is_packed = self._pending_packed
+        self._pending_packed = False
 
         name = None
         if self._check(TokenType.IDENTIFIER) and self._current().value not in ('__attribute__', '__attribute'):
             name = self._advance().value
 
-        # Skip __attribute__ after name, before brace
+        # Skip __attribute__ after name, before brace (may set _pending_packed too)
         self._skip_noise()
+        if self._pending_packed:
+            is_packed = True
+            self._pending_packed = False
 
         # Parse inline member definitions if present
         members = []
@@ -704,6 +723,15 @@ class Parser:
                 # and type, e.g. `int __attribute__((aligned(8))) a;`.
                 # Capture it before parse_type_specifier resets state.
                 self._skip_noise()
+                # _Static_assert as a member-declaration (C11 6.7.2.1).
+                if self._match(TokenType.STATIC_ASSERT):
+                    self._expect(TokenType.LPAREN)
+                    self._parse_expression()
+                    if self._match(TokenType.COMMA):
+                        self._expect(TokenType.STRING_LITERAL)
+                    self._expect(TokenType.RPAREN)
+                    self._expect(TokenType.SEMICOLON)
+                    continue
                 leading_align = self._pending_alignment
                 self._pending_alignment = None
                 member_type = self._parse_type_specifier()
@@ -740,11 +768,15 @@ class Parser:
                         break
                 self._expect(TokenType.SEMICOLON)
             self._expect(TokenType.RBRACE)
-            # Skip __attribute__ after closing brace
+            # Skip __attribute__ after closing brace (may set _pending_packed)
             self._skip_noise()
+            if self._pending_packed:
+                is_packed = True
+                self._pending_packed = False
 
         struct_type = ast.StructType(name=name, is_union=is_union,
-                                     members=members, location=loc)
+                                     members=members, is_packed=is_packed,
+                                     location=loc)
         # Annotate so downstream code can tell `struct foo {};` (a
         # definition with no members) from `struct foo;` (a forward).
         struct_type._had_inline_brace = had_brace
@@ -2140,7 +2172,9 @@ class Parser:
                 # Bare struct definition: struct Point { ... };
                 self._advance()  # consume semicolon
                 return ast.StructDecl(name=base_type.name, members=base_type.members,
-                                      is_union=base_type.is_union, is_definition=True, location=loc)
+                                      is_union=base_type.is_union,
+                                      is_packed=getattr(base_type, "is_packed", False),
+                                      is_definition=True, location=loc)
             elif is_typedef:
                 # typedef struct { ... } Name [, *Ptr, Other...] ;
                 first_name = None

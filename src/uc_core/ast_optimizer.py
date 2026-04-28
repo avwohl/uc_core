@@ -1659,6 +1659,8 @@ class ASTOptimizer:
         - Decimal without suffix: int → long → long long
         - Hex/octal without suffix: int → unsigned int → long → unsigned long → ...
         - U suffix: unsigned int → unsigned long → unsigned long long
+        - LU/UL suffix: unsigned long → unsigned long long
+        - LLU/ULL suffix: unsigned long long
         If value exceeds the range of the current type, promote to next.
         """
         tc = self.type_config
@@ -1668,7 +1670,20 @@ class ASTOptimizer:
         val = lit.value
         if getattr(lit, 'is_long_long', False):
             return long_long_mask
+        if lit.is_long and lit.is_unsigned:
+            # LU/UL suffix: unsigned long, then unsigned long long.
+            if val > tc.ulong_max or val < 0:
+                return long_long_mask
+            return long_mask
         if lit.is_long:
+            # L suffix on hex/octal: long → unsigned long → long long → ulong long.
+            # L suffix on decimal: long → long long.
+            if lit.is_hex:
+                if val > tc.ulong_max or val < -(tc.long_max + 1):
+                    return long_long_mask
+                if val > tc.long_max:
+                    return long_mask
+                return long_mask
             if val > tc.long_max or val < -(tc.long_max + 1):
                 return long_long_mask
             return long_mask
