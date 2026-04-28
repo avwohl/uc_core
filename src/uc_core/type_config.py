@@ -135,4 +135,5 @@ Z80_CPM = TypeConfig(
 WATCOM_FLAT32 = TypeConfig(
     char_size=1, short_size=2, int_size=4,
     long_size=4, long_long_size=8, ptr_size=4,
+    float_size=4, double_size=8, long_double_size=8,
 )
