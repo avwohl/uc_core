@@ -530,6 +530,27 @@ class Parser:
                 enum_type.is_const = is_const
                 enum_type.is_volatile = is_volatile
                 return enum_type
+            elif (
+                base_type is None
+                and self._check(TokenType.IDENTIFIER)
+                and self._current().value in ("__int128", "__int128_t")
+            ):
+                # GCC-extension 128-bit integer keyword. Setting
+                # `base_type` (rather than returning a typedef) lets
+                # `unsigned __int128` flow through the same path as
+                # `unsigned int` — the trailing BasicType picks up
+                # is_unsigned from the modifier.
+                self._advance()
+                base_type = "int128"
+            elif (
+                base_type is None
+                and self._check(TokenType.IDENTIFIER)
+                and self._current().value == "__uint128_t"
+            ):
+                self._advance()
+                base_type = "int128"
+                is_unsigned = True
+                is_signed = False
             elif base_type is None and self._check(TokenType.IDENTIFIER) and self._current().value in self.typedefs:
                 # Only match typedef name if we don't already have a base type
                 # e.g., "int s" where s is a typedef - s should be the variable name, not a type
