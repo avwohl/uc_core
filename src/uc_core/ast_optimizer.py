@@ -566,8 +566,11 @@ class ASTOptimizer:
         if shift is not None:
             self._stat("mul_to_shift")
             self._changed = True
-            if shift == 1:
-                # x * 2 → x + x (single ADD HL,HL)
+            if shift == 1 and not self._expr_has_side_effects(other):
+                # x * 2 → x + x (single ADD HL,HL).
+                # Skip when `other` has side effects — duplicating a
+                # `(n += 5)` or function-call operand would fire the
+                # effect twice and produce the wrong value.
                 return ast.BinaryOp(op="+", left=other, right=other,
                                     location=expr.location)
             return ast.BinaryOp(op="<<", left=other, right=ast.IntLiteral(
