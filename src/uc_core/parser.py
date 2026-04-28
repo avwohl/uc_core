@@ -428,7 +428,15 @@ class Parser:
         elif self._check(*self.TYPE_QUALIFIERS):
             result = True
         elif self._check(TokenType.IDENTIFIER):
-            result = self._current().value in self.typedefs
+            # Typedef name OR a GCC built-in 128-bit integer keyword
+            # (`__int128` / `__int128_t` / `__uint128_t`). The lexer
+            # tokenizes them as IDENTIFIERs; `_parse_type_specifier`
+            # handles them as base types.
+            result = self._current().value in self.typedefs or (
+                self._current().value in (
+                    "__int128", "__int128_t", "__uint128_t",
+                )
+            )
 
         self.pos = saved_pos  # Restore position
         return result
@@ -1966,6 +1974,17 @@ class Parser:
             # Check it's not a label (identifier followed by colon)
             if self._peek(1).type != TokenType.COLON:
                 return True
+        # GCC built-in 128-bit integer keywords. Tokenized as
+        # IDENTIFIERs by the lexer, but introduce a declaration the
+        # same way `unsigned __int128` (which goes through
+        # TYPE_SPECIFIERS via UNSIGNED) does.
+        if (
+            self._check(TokenType.IDENTIFIER)
+            and self._current().value in (
+                "__int128", "__int128_t", "__uint128_t",
+            )
+        ):
+            return True
         # GCC `__extension__` and friends — declaration noise that must
         # be peeked through to see if a declaration follows. Also handles
         # `__attribute__((...))` leading a local decl.
