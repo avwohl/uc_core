@@ -99,6 +99,9 @@ class Parser:
         # to NOT receive __cyg_profile_func_enter/exit instrumentation.
         # Cleared after each FunctionDecl consumes it.
         self._pending_no_instrument: bool = False
+        # `__attribute__((noinit))` — marks an uninitialized global as
+        # NOT zeroed at startup. Cleared after each VarDecl consumes it.
+        self._pending_noinit: bool = False
 
     def _current(self) -> Token:
         """Get current token."""
@@ -196,6 +199,15 @@ class Parser:
                         ):
                             self._advance()
                             self._pending_no_instrument = True
+                            continue
+                        if (
+                            self._check(TokenType.IDENTIFIER)
+                            and self._current().value in (
+                                "noinit", "__noinit__",
+                            )
+                        ):
+                            self._advance()
+                            self._pending_noinit = True
                             continue
                         if (
                             self._check(TokenType.IDENTIFIER)
@@ -2167,6 +2179,8 @@ class Parser:
             self._pending_alias = None
             decl_no_instr = self._pending_no_instrument
             self._pending_no_instrument = False
+            decl_noinit = self._pending_noinit
+            self._pending_noinit = False
             # Variable or typedef
             init = None
             if self._match(TokenType.ASSIGN):
@@ -2182,6 +2196,7 @@ class Parser:
                     alignment=decl_align,
                     alias_target=decl_alias,
                     no_instrument_function=decl_no_instr,
+                    is_noinit=decl_noinit,
                     location=loc,
                 ))
 
