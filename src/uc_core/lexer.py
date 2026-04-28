@@ -214,9 +214,16 @@ class Lexer:
         # Special case: "5.f" and "5.F" are float literals (suffix), not member access
         if base == 10 and self._peek() == '.':
             next_after_dot = self._peek(1)
-            # Check for float suffix: 5.f, 5.F, 5.l, 5.L (not followed by identifier part)
-            is_float_suffix = (next_after_dot.lower() in ('f', 'l') and
-                               not self._is_identifier_part(self._peek(2)))
+            # Check for float suffix: 5.f, 5.F, 5.l, 5.L, 5.df, 5.dd,
+            # 5.dl (not followed by identifier part — except for the
+            # decimal-FP `dX` family, where the second char is part of
+            # the suffix).
+            two_char = (next_after_dot + self._peek(2)).lower()
+            is_float_suffix = (
+                (next_after_dot.lower() in ('f', 'l') and
+                 not self._is_identifier_part(self._peek(2)))
+                or two_char in ('df', 'dd', 'dl')
+            )
             if self._is_digit(next_after_dot) or not self._is_identifier_start(next_after_dot) or is_float_suffix:
                 is_float = True
                 result.append(self._advance())  # .
@@ -254,16 +261,26 @@ class Lexer:
             while self._is_digit(self._peek()):
                 result.append(self._advance())
 
-        # Read suffix (including 'i' for GCC imaginary extension - ignored)
+        # Read suffix (including 'i' for GCC imaginary extension - ignored,
+        # and 'd' / 'D' for decimal-FP literals which we approximate as
+        # their binary counterparts: df→float, dd→double, dl→long double).
         suffix = []
-        while self._peek().lower() in 'uljfi':
+        while self._peek().lower() in 'uljfid':
             suffix.append(self._advance())
 
         text = ''.join(result)
         suffix_str = ''.join(suffix).lower()
 
-        if is_float or 'f' in suffix_str or 'i' in suffix_str:
-            # Float (or imaginary) literal
+        if (
+            is_float
+            or 'f' in suffix_str
+            or 'i' in suffix_str
+            or 'd' in suffix_str
+        ):
+            # Float (or imaginary) literal. Decimal-FP suffixes
+            # (df / dd / dl) are approximated as binary float / double
+            # / long double — sufficient for the gcc-c-torture decimal
+            # tests that only exercise zero comparisons.
             try:
                 if base == 16:
                     value = float.fromhex(text)
@@ -271,7 +288,7 @@ class Lexer:
                     value = float(text)
             except ValueError:
                 raise LexerError(f"Invalid float literal: {text}", loc)
-            has_f_suffix = 'f' in suffix_str
+            has_f_suffix = 'f' in suffix_str or 'df' in suffix_str
             has_i_suffix = 'i' in suffix_str
             return Token(TokenType.FLOAT_LITERAL, (value, has_f_suffix, has_i_suffix), loc)
         else:

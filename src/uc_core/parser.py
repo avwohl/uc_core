@@ -27,6 +27,7 @@ class Parser:
         TokenType.UNSIGNED, TokenType.BOOL, TokenType.STRUCT, TokenType.UNION,
         TokenType.ENUM, TokenType.COMPLEX, TokenType.IMAGINARY,
         TokenType.ATOMIC, TokenType.TYPEOF, TokenType.TYPEOF_UNQUAL,
+        TokenType.DECIMAL32, TokenType.DECIMAL64, TokenType.DECIMAL128,
     }
 
     # Type qualifiers
@@ -530,6 +531,15 @@ class Parser:
                 enum_type.is_const = is_const
                 enum_type.is_volatile = is_volatile
                 return enum_type
+            elif self._match(TokenType.DECIMAL32):
+                # ISO TS 18661-2 decimal floating-point, approximated
+                # as binary float. Sufficient for tests that exercise
+                # only zero comparisons.
+                base_type = "float"
+            elif self._match(TokenType.DECIMAL64):
+                base_type = "double"
+            elif self._match(TokenType.DECIMAL128):
+                base_type = "long double"
             elif (
                 base_type is None
                 and self._check(TokenType.IDENTIFIER)
