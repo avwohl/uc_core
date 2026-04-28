@@ -409,6 +409,7 @@ class VarDecl(Declaration):
     storage_class: Optional[str] = None  # "static", "extern", "register", "auto"
     alignment: Optional[int] = None  # __attribute__((aligned(N)))
     alias_target: Optional[str] = None  # __attribute__((alias("other")))
+    no_instrument_function: bool = False  # __attribute__((no_instrument_function))
 
 
 @dataclass(kw_only=True)
@@ -433,6 +434,7 @@ class FunctionDecl(Declaration):
     storage_class: Optional[str] = None
     is_inline: bool = False
     alignment: Optional[int] = None  # __attribute__((aligned(N)))
+    no_instrument_function: bool = False  # __attribute__((no_instrument_function))
 
 
 @dataclass(kw_only=True)

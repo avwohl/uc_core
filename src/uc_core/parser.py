@@ -95,6 +95,10 @@ class Parser:
         # — the next declarator becomes a NASM-level alias for `name`.
         # Cleared after each VarDecl/FunctionDecl consumes it.
         self._pending_alias: str | None = None
+        # `__attribute__((no_instrument_function))` — marks a function
+        # to NOT receive __cyg_profile_func_enter/exit instrumentation.
+        # Cleared after each FunctionDecl consumes it.
+        self._pending_no_instrument: bool = False
 
     def _current(self) -> Token:
         """Get current token."""
@@ -182,6 +186,16 @@ class Parser:
                                     self._advance()
                                 while not self._check(TokenType.EOF) and not self._match(TokenType.RPAREN):
                                     self._advance()
+                            continue
+                        if (
+                            self._check(TokenType.IDENTIFIER)
+                            and self._current().value in (
+                                "no_instrument_function",
+                                "__no_instrument_function__",
+                            )
+                        ):
+                            self._advance()
+                            self._pending_no_instrument = True
                             continue
                         if (
                             self._check(TokenType.IDENTIFIER)
@@ -2127,10 +2141,13 @@ class Parser:
                 if not self._check(TokenType.LBRACE):
                     self._parse_kr_declarations(params)
                 body = self._parse_compound_statement()
+                no_instr = self._pending_no_instrument
+                self._pending_no_instrument = False
                 return ast.FunctionDecl(
                     name=name, return_type=full_type.return_type, params=params,
                     body=body, is_variadic=full_type.is_variadic,
                     storage_class=storage_class, is_inline=is_inline,
+                    no_instrument_function=no_instr,
                     location=loc
                 )
 
@@ -2148,6 +2165,8 @@ class Parser:
             self._pending_alignment = None
             decl_alias = self._pending_alias
             self._pending_alias = None
+            decl_no_instr = self._pending_no_instrument
+            self._pending_no_instrument = False
             # Variable or typedef
             init = None
             if self._match(TokenType.ASSIGN):
@@ -2162,6 +2181,7 @@ class Parser:
                     storage_class=storage_class,
                     alignment=decl_align,
                     alias_target=decl_alias,
+                    no_instrument_function=decl_no_instr,
                     location=loc,
                 ))
 
