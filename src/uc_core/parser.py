@@ -1908,11 +1908,17 @@ class Parser:
             stmt = self._parse_statement()
             return ast.CaseStmt(value=None, stmt=stmt, location=loc)
 
-        # Labeled statement
+        # Labeled statement. Per C23 6.8.2, a label may precede a
+        # declaration as well as a statement. Older C versions and
+        # earlier strict parsers only allowed statements, but modern
+        # gcc accepts declarations after labels too.
         if self._check(TokenType.IDENTIFIER) and self._peek(1).type == TokenType.COLON:
             label = self._advance().value
             self._advance()  # :
-            stmt = self._parse_statement()
+            if self._is_declaration_start():
+                stmt = self._parse_declaration()
+            else:
+                stmt = self._parse_statement()
             return ast.LabelStmt(label=label, stmt=stmt, location=loc)
 
         # Expression statement (or empty)
