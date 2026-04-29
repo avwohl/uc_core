@@ -165,6 +165,15 @@ class ASTOptimizer:
                     self._optimize_stmt(stmt.else_branch)
 
         elif isinstance(stmt, ast.WhileStmt):
+            # The body may run multiple times and re-enter the
+            # condition with mutated state. Copy/CSE caches built
+            # before the loop don't apply to subsequent iterations,
+            # so clear BEFORE optimizing the condition too — otherwise
+            # `int *p = head; while (p) { ...; p = next; }` rewrites
+            # the loop condition's `p` back to `head` (the pre-loop
+            # copy) and the loop runs forever.
+            if self.opt_level >= 3:
+                self._clear_all_caches()
             stmt.condition = self._optimize_expr(stmt.condition)
             # while(0) → dead loop body (only if no labels inside)
             if (isinstance(stmt.condition, ast.IntLiteral) and stmt.condition.value == 0
@@ -173,9 +182,6 @@ class ASTOptimizer:
                 self._changed = True
                 stmt.body = ast.CompoundStmt(items=[], location=stmt.location)
             else:
-                # The body may run multiple times and re-enter the
-                # condition with mutated state. Copy/CSE caches built
-                # before the loop don't apply to subsequent iterations.
                 if self.opt_level >= 3:
                     self._clear_all_caches()
                 self._optimize_stmt(stmt.body)
@@ -196,6 +202,11 @@ class ASTOptimizer:
                     stmt.init = self._optimize_expr(stmt.init)
                 elif isinstance(stmt.init, ast.Declaration):
                     self._optimize_decl(stmt.init)
+            # Clear caches BEFORE condition / update — they re-evaluate
+            # on subsequent iterations after the body has potentially
+            # mutated state. Same shape as the WhileStmt fix.
+            if self.opt_level >= 3:
+                self._clear_all_caches()
             if stmt.condition is not None:
                 stmt.condition = self._optimize_expr(stmt.condition)
             if stmt.update is not None:
