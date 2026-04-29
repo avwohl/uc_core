@@ -1070,6 +1070,26 @@ class ASTOptimizer:
                     ASTOptimizer._expr_has_side_effects(expr.index))
         if isinstance(expr, ast.Cast):
             return ASTOptimizer._expr_has_side_effects(expr.expr)
+        # `s.m` and `p->m`: the access itself doesn't have a side
+        # effect, but the object expression may. Without this,
+        # `make().x * 2` got strength-reduced to
+        # `make().x + make().x`, calling `make()` twice.
+        if isinstance(expr, ast.Member):
+            return ASTOptimizer._expr_has_side_effects(expr.obj)
+        # Compound literals: `(T){init}` evaluates each initializer
+        # when the literal is materialized. Without this,
+        # `(struct S){f()}.x * 2` calls f() twice.
+        if isinstance(expr, ast.Compound):
+            return ASTOptimizer._expr_has_side_effects(expr.init)
+        if isinstance(expr, ast.InitializerList):
+            for v in expr.values:
+                if isinstance(v, ast.DesignatedInit):
+                    if ASTOptimizer._expr_has_side_effects(v.value):
+                        return True
+                elif isinstance(v, ast.Expression):
+                    if ASTOptimizer._expr_has_side_effects(v):
+                        return True
+            return False
         return False
 
     @staticmethod
