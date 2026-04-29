@@ -1045,6 +1045,12 @@ class ASTOptimizer:
         """Check if an expression has side effects."""
         if isinstance(expr, (ast.Call, ast.StmtExpr)):
             return True
+        # `va_arg(ap, T)` advances the va_list pointer — that's a
+        # side effect. Without this, `va_arg(ap, int) * 2` got
+        # strength-reduced to `va_arg + va_arg`, evaluating va_arg
+        # twice and skipping a value.
+        if isinstance(expr, ast.VaArgExpr):
+            return True
         if isinstance(expr, ast.UnaryOp):
             if expr.op in ("++", "--"):
                 return True
