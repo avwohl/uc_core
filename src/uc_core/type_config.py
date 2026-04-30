@@ -96,6 +96,11 @@ class TypeConfig:
         headers (limits.h, stdint.h) can conditionalize on width.
         """
         bits = lambda n: n * 8
+        # GCC-compatible type names for __SIZE_TYPE__ / __PTRDIFF_TYPE__:
+        # pick the basic integer whose size matches the pointer.
+        size_name = self._basic_for_size(self.ptr_size, signed=False)
+        ptrdiff_name = self._basic_for_size(self.ptr_size, signed=True)
+        wchar_name = self._basic_for_size(self.short_size, signed=True)
         return {
             "__CHAR_BIT__":         "8",
             "__SIZEOF_CHAR__":      str(self.char_size),
@@ -109,6 +114,7 @@ class TypeConfig:
             "__SIZEOF_LONG_DOUBLE__": str(self.long_double_size),
             "__SIZEOF_SIZE_T__":    str(self.ptr_size),
             "__SIZEOF_PTRDIFF_T__": str(self.ptr_size),
+            "__SIZEOF_WCHAR_T__":   str(self.short_size),
             "__CHAR_WIDTH__":       str(bits(self.char_size)),
             "__SHORT_WIDTH__":      str(bits(self.short_size)),
             "__INT_WIDTH__":        str(bits(self.int_size)),
@@ -122,7 +128,30 @@ class TypeConfig:
             "__INT_MAX__":          str(self.int_max),
             "__LONG_MAX__":         str(self.long_max) + "L",
             "__LONG_LONG_MAX__":    str(self.long_long_max) + "LL",
+            # GCC-style type-name macros used by torture tests and headers
+            # to spell size_t / ptrdiff_t / wchar_t without dragging stddef.h.
+            "__SIZE_TYPE__":        size_name,
+            "__PTRDIFF_TYPE__":     ptrdiff_name,
+            "__WCHAR_TYPE__":       wchar_name,
+            "__INTMAX_TYPE__":      "long long int",
+            "__UINTMAX_TYPE__":     "unsigned long long int",
+            "__INTPTR_TYPE__":      ptrdiff_name,
+            "__UINTPTR_TYPE__":     size_name,
         }
+
+    def _basic_for_size(self, size: int, signed: bool) -> str:
+        """Pick the smallest basic-int type whose size matches `size`.
+        Used to spell __SIZE_TYPE__ etc. as a real C type name."""
+        candidates = [
+            (self.short_size,    "short int" if signed else "unsigned short int"),
+            (self.int_size,      "int" if signed else "unsigned int"),
+            (self.long_size,     "long int" if signed else "unsigned long int"),
+            (self.long_long_size,"long long int" if signed else "unsigned long long int"),
+        ]
+        for sz, name in candidates:
+            if sz == size:
+                return name
+        return "unsigned long int"
 
 
 # Common presets for backends to pick from --------------------------------
