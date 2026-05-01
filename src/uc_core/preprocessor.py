@@ -105,6 +105,83 @@ class Preprocessor:
         time_int = now.strftime("%H%M%S")
         self.macros["__TIME_INT__"] = Macro("__TIME_INT__", body=time_int, is_predefined=True)
 
+    @staticmethod
+    def _strip_comments(source: str) -> str:
+        """Replace /* ... */ and // ... comments with whitespace.
+
+        Block comments → space (preserving embedded newlines so line
+        numbers stay correct). Line comments → empty (the trailing
+        newline stays). String and character literals are skipped so
+        comment-like sequences inside them survive.
+
+        Done as a pre-pass so the line-by-line loop below doesn't lose
+        block-comment state across line boundaries — the previous
+        line-local skip in `_expand_macros` couldn't see a `/*` opened
+        on a prior line, so macros named inside multi-line comments
+        were incorrectly expanded.
+        """
+        out = []
+        i = 0
+        n = len(source)
+        while i < n:
+            c = source[i]
+            # String literal — copy through, respecting backslash escapes.
+            if c == '"':
+                out.append(c)
+                i += 1
+                while i < n:
+                    out.append(source[i])
+                    if source[i] == '\\' and i + 1 < n:
+                        i += 1
+                        out.append(source[i])
+                    elif source[i] == '"':
+                        i += 1
+                        break
+                    i += 1
+                continue
+            # Char literal — same treatment.
+            if c == "'":
+                out.append(c)
+                i += 1
+                while i < n:
+                    out.append(source[i])
+                    if source[i] == '\\' and i + 1 < n:
+                        i += 1
+                        out.append(source[i])
+                    elif source[i] == "'":
+                        i += 1
+                        break
+                    i += 1
+                continue
+            # Block comment.
+            if c == '/' and i + 1 < n and source[i + 1] == '*':
+                j = source.find('*/', i + 2)
+                if j < 0:
+                    # Unterminated block comment — preserve newlines
+                    # so error messages still report sensible lines.
+                    for ch in source[i:]:
+                        out.append('\n' if ch == '\n' else ' ')
+                    return ''.join(out)
+                # Replace with a single space, but keep any newlines
+                # that were in the comment so line numbering matches.
+                for ch in source[i:j + 2]:
+                    if ch == '\n':
+                        out.append('\n')
+                out.append(' ')
+                i = j + 2
+                continue
+            # Line comment — replace through end of line with empty
+            # text; the `\n` itself stays.
+            if c == '/' and i + 1 < n and source[i + 1] == '/':
+                j = source.find('\n', i + 2)
+                if j < 0:
+                    return ''.join(out)
+                i = j  # leave the \n in place
+                continue
+            out.append(c)
+            i += 1
+        return ''.join(out)
+
     def preprocess(self, source: str, filename: str = "<stdin>") -> str:
         """Preprocess source code and return the result."""
         self.current_file = filename
@@ -112,6 +189,10 @@ class Preprocessor:
 
         # Set __FILE__ for this file
         self.macros["__FILE__"] = Macro("__FILE__", body=f'"{filename}"', is_predefined=True)
+
+        # Strip comments up front so multi-line /* */ blocks don't
+        # leak macro-expansion into their interior on subsequent lines.
+        source = self._strip_comments(source)
 
         lines = source.split('\n')
         output_lines = []
@@ -229,6 +310,9 @@ class Preprocessor:
 
         # Set __FILE__ for this file
         self.macros["__FILE__"] = Macro("__FILE__", body=f'"{filename}"', is_predefined=True)
+
+        # Strip comments up front (see preprocess() — same reason).
+        source = self._strip_comments(source)
 
         lines = source.split('\n')
         output_lines = []
