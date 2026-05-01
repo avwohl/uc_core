@@ -396,8 +396,12 @@ class Preprocessor:
             saved_line = self.current_line
             saved_stack_depth = len(self.state.condition_stack)
 
-            # Preprocess included file
-            with open(full_path, 'r') as f:
+            # Preprocess included file. Period code sometimes embeds
+            # non-UTF-8 bytes (`\xCD` etc.); surrogateescape lets the
+            # preprocessor see them as opaque high-bit characters
+            # that flow through to the lexer (which already handles
+            # them via main.py's surrogateescape read).
+            with open(full_path, 'r', errors='surrogateescape') as f:
                 content = f.read()
 
             result = self._preprocess_included(content, full_path, saved_stack_depth)
