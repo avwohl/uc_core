@@ -168,7 +168,13 @@ class Preprocessor:
         return '\n'.join(output_lines)
 
     def _has_unclosed_macro_call(self, text: str) -> bool:
-        """Check if text contains a function-like macro name followed by unclosed parens."""
+        """Check if text contains a function-like macro name followed by unclosed parens.
+
+        Skips over string / char literals AND `//` line and `/* */` block
+        comments — apostrophes inside a comment ("viewer's") would otherwise
+        spoof the string tracker and make the merge loop gobble the rest of
+        the file looking for a matching paren.
+        """
         import re
         for m in re.finditer(r'[a-zA-Z_]\w*', text):
             name = m.group()
@@ -195,6 +201,16 @@ class Preprocessor:
                         elif ch in '"\'':
                             in_string = True
                             quote_char = ch
+                        elif ch == '/' and j + 1 < len(text) and text[j + 1] == '/':
+                            # Line comment — skip to end of line.
+                            nl = text.find('\n', j + 2)
+                            j = len(text) if nl == -1 else nl
+                            continue
+                        elif ch == '/' and j + 1 < len(text) and text[j + 1] == '*':
+                            # Block comment — skip to closing */.
+                            end = text.find('*/', j + 2)
+                            j = len(text) if end == -1 else end + 2
+                            continue
                         elif ch == '(':
                             depth += 1
                         elif ch == ')':
@@ -236,6 +252,15 @@ class Preprocessor:
                 if result is not None:
                     output_lines.append(result)
             elif self._is_active():
+                # Function-like macro invocations whose `( ... )` spans
+                # several lines (chocolate-doom's `PACKED_STRUCT(...)`,
+                # for example) only expand correctly if we glue the
+                # follow-on lines onto the head before _expand_macros
+                # runs. The top-level preprocess() loop does this; the
+                # included-file path was missing the same merge.
+                while i + 1 < len(lines) and self._has_unclosed_macro_call(line):
+                    i += 1
+                    line = line + '\n' + lines[i]
                 expanded = self._expand_macros(line)
                 output_lines.append(expanded)
 
@@ -387,9 +412,53 @@ class Preprocessor:
         raise PreprocessorError(f"Cannot find include file: {filename}",
                                self.current_file, self.current_line)
 
+    @staticmethod
+    def _strip_directive_comments(text: str) -> str:
+        """Trim `//` line and `/* */` block comments from a directive arg.
+
+        Walk the text, skipping characters inside string and char literals
+        so a `//` or `/*` inside a quoted body stays intact. At directive
+        scope a `//` always runs to end-of-line (the directive itself is
+        already a single logical line by the time we see it)."""
+        out = []
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            if ch in '"\'':
+                quote = ch
+                out.append(ch)
+                i += 1
+                while i < n:
+                    out.append(text[i])
+                    if text[i] == '\\' and i + 1 < n:
+                        i += 1
+                        out.append(text[i])
+                    elif text[i] == quote:
+                        i += 1
+                        break
+                    i += 1
+                continue
+            if ch == '/' and i + 1 < n:
+                if text[i + 1] == '/':
+                    return ''.join(out).rstrip()
+                if text[i + 1] == '*':
+                    end = text.find('*/', i + 2)
+                    i = n if end < 0 else end + 2
+                    out.append(' ')
+                    continue
+            out.append(ch)
+            i += 1
+        return ''.join(out).rstrip()
+
     def _process_define(self, args: str) -> None:
         """Process #define directive."""
         args = args.strip()
+        # Strip trailing `// line-comment` and `/* block-comment */` from
+        # the directive's text — period code happily tags `#define X 16
+        # // 4 players` and the comment text would otherwise become
+        # part of the macro body and leak into every expansion site.
+        args = self._strip_directive_comments(args)
         if not args:
             raise PreprocessorError("Expected macro name after #define",
                                    self.current_file, self.current_line)
@@ -894,28 +963,13 @@ class Preprocessor:
                     result.append(text[i:j + 1])
                     i = j + 1
                 continue
-            # Skip strings and character literals
-            if text[i] in '"\'':
-                quote = text[i]
-                j = i + 1
-                while j < len(text):
-                    if text[j] == '\\' and j + 1 < len(text):
-                        j += 2
-                    elif text[j] == quote:
-                        j += 1
-                        break
-                    else:
-                        j += 1
-                result.append(text[i:j])
-                i = j
-                continue
-
-            # Skip /* … */ block comments and // line comments. Macros
-            # named inside a comment must NOT be expanded — otherwise an
-            # expansion that itself contains `*/` would corrupt the
-            # surrounding comment (e.g. `SIG_ERR` defined as
-            # `((sig_handler_t)-1) /* err */` invoked inside another
-            # comment).
+            # Skip /* … */ block comments and // line comments FIRST,
+            # before string-literal detection — an apostrophe inside a
+            # `//` comment ("viewer's side") would otherwise open a
+            # bogus character literal that swallows the rest of the
+            # input. Macros named inside a comment must NOT be expanded
+            # either; the verbatim emit also keeps `*/` from corrupting
+            # any expansion that contains it.
             if text[i] == '/' and i + 1 < len(text):
                 nxt = text[i + 1]
                 if nxt == '*':
@@ -936,6 +990,22 @@ class Preprocessor:
                         result.append(text[i:j])
                         i = j
                     continue
+
+            # Skip strings and character literals
+            if text[i] in '"\'':
+                quote = text[i]
+                j = i + 1
+                while j < len(text):
+                    if text[j] == '\\' and j + 1 < len(text):
+                        j += 2
+                    elif text[j] == quote:
+                        j += 1
+                        break
+                    else:
+                        j += 1
+                result.append(text[i:j])
+                i = j
+                continue
 
             # Recognize number tokens (including suffixes) as a unit so a
             # macro named `F` doesn't mangle `0.0F` into `0.0140`. C99
@@ -1017,6 +1087,30 @@ class Preprocessor:
 
         while i < len(text) and paren_depth > 0:
             ch = text[i]
+
+            # Comments first — period code happily writes things like
+            # `// viewer's side` inside the macro's brace block, and we
+            # must not let the apostrophe inside the comment open a
+            # bogus char literal that swallows the close-paren. Drop
+            # the comment text entirely (replace with a single space)
+            # so subsequent newline-to-space conversion doesn't fuse
+            # the comment text into the active code line.
+            if ch == '/' and i + 1 < len(text) and text[i + 1] == '/':
+                end = text.find('\n', i + 2)
+                if end < 0:
+                    end = len(text)
+                current_arg.append(' ')
+                i = end
+                continue
+            if ch == '/' and i + 1 < len(text) and text[i + 1] == '*':
+                end = text.find('*/', i + 2)
+                if end < 0:
+                    end = len(text)
+                else:
+                    end += 2
+                current_arg.append(' ')
+                i = end
+                continue
 
             if ch == '(':
                 paren_depth += 1
