@@ -1487,7 +1487,23 @@ class ASTOptimizer:
         if isinstance(t1, ast.BasicType) and isinstance(t2, ast.BasicType):
             # Must be same type category (e.g., both "int", both "float")
             return t1.name == t2.name
-        # For pointers, arrays, structs - same type means compatible
+        # For pointers, also require the pointee's type category to match.
+        # `struct printer *pr = void_ptr;` is a legal C conversion, but if
+        # the optimizer rewrites later `pr->m` references as `void_ptr->m`,
+        # downstream `_type_of` loses the declared struct type. Without this
+        # guard, the codegen rejects the resulting `->` lowering.
+        if isinstance(t1, ast.PointerType) and isinstance(t2, ast.PointerType):
+            b1, b2 = t1.base_type, t2.base_type
+            # void* on either side: refuse propagation. The conversion loses
+            # type information needed for member access.
+            if (isinstance(b1, ast.BasicType) and b1.name == "void"):
+                return False
+            if (isinstance(b2, ast.BasicType) and b2.name == "void"):
+                return False
+            # Different kinds of pointee (struct vs basic, etc.): refuse.
+            if type(b1) != type(b2):
+                return False
+        # For arrays, structs - same type means compatible
         return True
 
     # === Level 3: Dead store elimination ===
