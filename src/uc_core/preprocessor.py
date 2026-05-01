@@ -333,29 +333,56 @@ class Preprocessor:
             raise PreprocessorError(f"Invalid #include syntax: {args}",
                                    self.current_file, self.current_line)
 
-        # Search for file
+        # Period DOS sources sometimes use Windows-style backslashes:
+        # `#include <sys\stat.h>`. Normalize to forward slashes for
+        # the host filesystem.
+        if "\\" in filename:
+            filename = filename.replace("\\", "/")
+        # Search for file. Period DOS code mixes case freely
+        # (`#include "global.h"` next to a real file `GLOBAL.H`); after
+        # the exact-match pass, fall back to a case-insensitive scan
+        # of each search dir so DOS-era sources work on case-sensitive
+        # hosts.
+        full_path = None
         for path in search_paths:
-            full_path = os.path.join(path, filename) if path else filename
-            if os.path.exists(full_path):
-                full_path = os.path.abspath(full_path)
+            candidate = os.path.join(path, filename) if path else filename
+            if os.path.exists(candidate):
+                full_path = candidate
+                break
+        if full_path is None:
+            target_lower = filename.lower()
+            for path in search_paths:
+                base = path or "."
+                try:
+                    entries = os.listdir(base)
+                except OSError:
+                    continue
+                for entry in entries:
+                    if entry.lower() == target_lower:
+                        full_path = os.path.join(path, entry)
+                        break
+                if full_path is not None:
+                    break
+        if full_path is not None:
+            full_path = os.path.abspath(full_path)
 
-                # Save current state
-                saved_file = self.current_file
-                saved_line = self.current_line
-                saved_stack_depth = len(self.state.condition_stack)
+            # Save current state
+            saved_file = self.current_file
+            saved_line = self.current_line
+            saved_stack_depth = len(self.state.condition_stack)
 
-                # Preprocess included file
-                with open(full_path, 'r') as f:
-                    content = f.read()
+            # Preprocess included file
+            with open(full_path, 'r') as f:
+                content = f.read()
 
-                result = self._preprocess_included(content, full_path, saved_stack_depth)
+            result = self._preprocess_included(content, full_path, saved_stack_depth)
 
-                # Restore state
-                self.current_file = saved_file
-                self.current_line = saved_line
-                self.macros["__FILE__"] = Macro("__FILE__", body=f'"{saved_file}"', is_predefined=True)
+            # Restore state
+            self.current_file = saved_file
+            self.current_line = saved_line
+            self.macros["__FILE__"] = Macro("__FILE__", body=f'"{saved_file}"', is_predefined=True)
 
-                return result
+            return result
 
         raise PreprocessorError(f"Cannot find include file: {filename}",
                                self.current_file, self.current_line)
