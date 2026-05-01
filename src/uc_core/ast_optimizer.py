@@ -21,8 +21,35 @@ Level 3 (-O3) adds:
 """
 
 import copy
+import dataclasses
 from . import ast
 from .type_config import TypeConfig, Z80_CPM
+
+
+def _expr_has_float(node) -> bool:
+    """Lexical detection: does `node`'s subtree contain a FloatLiteral
+    or a Cast to a floating type? Used by strength-reduction passes
+    that mustn't fire on expressions whose runtime value is a float.
+
+    Lexical (no type-resolution) so it's correct for the common period-
+    code shapes (`-.5 * (1<<16)`, `1.0 + x`) without needing the full
+    type checker. False negatives on opaque calls are fine — we'd just
+    miss a strength reduction; we never WRONGLY strength-reduce."""
+    if node is None:
+        return False
+    if isinstance(node, ast.FloatLiteral):
+        return True
+    if isinstance(node, ast.Cast):
+        t = node.target_type
+        if isinstance(t, ast.BasicType) and t.name in ("float", "double", "long double"):
+            return True
+    if isinstance(node, list):
+        return any(_expr_has_float(c) for c in node)
+    if dataclasses.is_dataclass(node):
+        for f in dataclasses.fields(node):
+            if _expr_has_float(getattr(node, f.name, None)):
+                return True
+    return False
 
 
 class ASTOptimizer:
@@ -557,7 +584,11 @@ class ASTOptimizer:
         # The latter is fine in principle, but we'd need to know the type to
         # confirm.  Cast nodes around float values are the common case
         # ((float)N * 16) and we conservatively bail out for any cast or
-        # float literal.
+        # float literal — _or_ for any expression that contains a
+        # FloatLiteral subterm (e.g. `-.5 * (1<<16)` parses with the inner
+        # `(1<<16)` already collapsed to `IntLiteral(65536)`, so `other`
+        # there is `UnaryOp(-, FloatLiteral)` — not a Cast or FloatLiteral
+        # at the top, but we still mustn't shift it).
         if isinstance(other, (ast.FloatLiteral, ast.Cast)):
             if isinstance(other, ast.Cast):
                 t = other.target_type
@@ -565,6 +596,8 @@ class ASTOptimizer:
                     return None
             else:
                 return None
+        if _expr_has_float(other):
+            return None
 
         val = const.value
 
