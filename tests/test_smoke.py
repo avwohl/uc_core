@@ -47,3 +47,33 @@ def test_backend_protocol_is_structural():
             return ""
 
     assert isinstance(Stub(), CodeGenerator)
+
+
+def test_macro_param_substitution_is_simultaneous():
+    """C99 §6.10.3.1: parameter substitution happens simultaneously,
+    not iteratively. When one arg's text contains a token that matches
+    another param's name, that token must NOT be re-substituted.
+
+    Regression test for a real-world case caught in MicroPython's
+    `mp_seq_replace_slice_grow_inplace(... beg, end, slice, ...)`
+    macro: callers pass `slice.start` for `beg` (referencing a local
+    `mp_bound_slice_t slice;` variable). The body's `beg` substitutes
+    to `slice.start` — the `slice` token in that result is the user's
+    identifier and must stay put. Iterative substitution would
+    rewrite it via the `slice` parameter, turning `slice.start` into
+    whatever was passed for the `slice` param (e.g. `value_items`)
+    and producing nonsense like `value_items.start`."""
+    pp = Preprocessor()
+    pp.preprocess(
+        "#define M(beg, slice) beg + slice\n",
+        "t.c",
+    )
+    # `slice.start` is the `beg` arg; `value_items` is the `slice` arg.
+    # The `slice` token inside `slice.start` must NOT be rewritten.
+    out = pp.preprocess("M(slice.start, value_items)\n", "t.c")
+    assert "value_items.start" not in out, (
+        f"iterative substitution leaked: {out!r}"
+    )
+    assert "slice.start + value_items" in out, (
+        f"expected simultaneous substitution result, got: {out!r}"
+    )

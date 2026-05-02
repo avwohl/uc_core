@@ -1277,16 +1277,24 @@ class Preprocessor:
                 expanded_args.append(self._expand_macros(arg))
             else:
                 expanded_args.append(arg)
-        # Regular parameter substitution
-        for param, arg in zip(macro.params, expanded_args):
-            # Replace parameter with argument (word boundary).
-            # Negative lookahead skips when the identifier is followed by `'`
-            # or `"` — that would form a wide-char/string-literal prefix (e.g.
-            # `L'1'` is a single token; substituting `L`'s arg would break it).
-            # Use lambda to prevent re.sub from interpreting escape sequences in arg
+        # Regular parameter substitution — one pass, simultaneous.
+        # C99 §6.10.3.1 requires every parameter substitution to happen
+        # at the same time; iterating per-param breaks when one arg's
+        # text contains a token that matches another param's name. E.g.
+        # the macro `M(beg, slice) → beg + slice` invoked with
+        # `M(slice.start, value_items)`:
+        #   - simultaneous: `(slice.start) + (value_items)`
+        #   - iterative beg-then-slice: `(value_items.start) + (value_items)`
+        # The iterative form re-substitutes the `slice` token that came
+        # from the `beg` arg's value (`slice.start`), which is wrong —
+        # that `slice` is the user's identifier, not the parameter.
+        # Match any param via alternation, look up the arg in a single dict.
+        if macro.params:
+            param_map = dict(zip(macro.params, expanded_args))
+            param_alt = "|".join(re.escape(p) for p in macro.params)
             body = re.sub(
-                rf'\b{re.escape(param)}\b(?![\'"])',
-                lambda m, a=arg: a,
+                rf'\b({param_alt})\b(?![\'"])',
+                lambda m, pm=param_map: pm[m.group(1)],
                 body,
             )
 
