@@ -77,3 +77,25 @@ def test_macro_param_substitution_is_simultaneous():
     assert "slice.start + value_items" in out, (
         f"expected simultaneous substitution result, got: {out!r}"
     )
+
+
+def test_macro_param_prefix_collision():
+    """One parameter name being a prefix of another (`x` and `xy`)
+    must not cause the shorter name to mis-match. Word-boundary
+    regex semantics handle this — but only if the alternation
+    doesn't short-circuit on the prefix. Pin it."""
+    pp = Preprocessor()
+    pp.preprocess("#define M(x, xy) x + xy\n", "t.c")
+    out = pp.preprocess("M(1, 2)\n", "t.c")
+    assert "1 + 2" in out, f"prefix-collision substitution broke: {out!r}"
+
+
+def test_macro_param_repeated_substitution():
+    """A param mentioned multiple times in the body must be
+    substituted at every occurrence (re.sub's default replaces all
+    matches, but since we changed the substitution mechanism this
+    is worth pinning)."""
+    pp = Preprocessor()
+    pp.preprocess("#define M(p) p+p+p\n", "t.c")
+    out = pp.preprocess("M(7)\n", "t.c")
+    assert "7+7+7" in out, f"repeated substitution failed: {out!r}"
