@@ -164,9 +164,26 @@ class Preprocessor:
                     return ''.join(out)
                 # Replace with a single space, but keep any newlines
                 # that were in the comment so line numbering matches.
-                for ch in source[i:j + 2]:
-                    if ch == '\n':
+                # Exception: `\\\n` is line-spliced away by phase 2
+                # of the C standard BEFORE phase 3 (comment removal)
+                # sees it — so don't preserve the newline that came
+                # from a `\` continuation. Multi-line macro bodies
+                # whose comment text wraps with `\` (lwIP's pbuf.h's
+                # `PBUF_CHECK_FREE_OOSEQ` is the trip wire) need this:
+                # otherwise the newlines they shouldn't have contributed
+                # split the macro body and the trailing brace fragments
+                # leak out as bogus file-scope code.
+                k = i
+                end = j + 2
+                while k < end:
+                    if (source[k] == '\\' and k + 1 < end
+                            and source[k + 1] == '\n'):
+                        k += 2  # phase 2 ate the splice; no newline
+                    elif source[k] == '\n':
                         out.append('\n')
+                        k += 1
+                    else:
+                        k += 1
                 out.append(' ')
                 i = j + 2
                 continue
