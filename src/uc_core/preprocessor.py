@@ -750,8 +750,12 @@ class Preprocessor:
         # Then replace any remaining simple identifiers
         expr = re.sub(r'\b[a-zA-Z_]\w*\b', '0', expr)
 
-        # Strip C integer suffixes (L, U, LL, UL, ULL, etc.) before eval
-        expr = re.sub(r'\b(\d+)[UuLl]+\b', r'\1', expr)
+        # Strip C integer suffixes (L, U, LL, UL, ULL, etc.) before eval.
+        # Covers both decimal (`42UL`) and hex (`0x80U`) literals — lwIP's
+        # debug.h uses `0x00U` / `0x80U` etc. and the regex below would
+        # otherwise leave the suffix in place since `\b\d+` doesn't span
+        # the `0x` prefix.
+        expr = re.sub(r'\b(0[xX][0-9a-fA-F]+|\d+)[UuLl]+\b', r'\1', expr)
 
         # Evaluate the expression
         try:
