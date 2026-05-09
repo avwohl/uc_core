@@ -1,7 +1,6 @@
 """Smoke tests: verify the uc_core pipeline is wired up and target-neutral."""
 
-from uc_core.lexer import Lexer
-from uc_core.parser import Parser
+from uc_core.frontend import parse
 from uc_core.preprocessor import Preprocessor
 from uc_core.ast_optimizer import ASTOptimizer
 from uc_core import ast
@@ -18,8 +17,7 @@ int answer(void) { return 42; }
 def test_pipeline_end_to_end():
     pp = Preprocessor(target_predefines={"__MYTARGET__": "1"})
     preprocessed = pp.preprocess(SRC, "t.c")
-    tokens = list(Lexer(preprocessed, "t.c").tokenize())
-    unit = Parser(tokens).parse()
+    unit = parse(preprocessed, "t.c")
     unit = ASTOptimizer(3).optimize(unit)
     funcs = [d for d in unit.declarations if isinstance(d, ast.FunctionDecl)]
     assert len(funcs) == 1

@@ -40,7 +40,7 @@ from plox.parse.runtime import HookRegistry, ParseNode, parse as _plox_parse
 from plox.tables import balanced_from_json, dfa_from_json, table_from_json
 
 from . import ast
-from .tokens import SourceLocation
+from .ast import SourceLocation
 
 
 _BUNDLE_PATH = Path(__file__).parent / "data" / "c23.json"
@@ -76,6 +76,7 @@ def parse(
     to libc-typedef'd names as types parse as IDENT and fall through
     to a syntax error in declarator position.
     """
+    _vector_names.clear()
     pre = _strip_attributes(source)
     scanner, table = _load_c23()
 
@@ -317,13 +318,55 @@ _C23_ATTR_RE = re.compile(r"\[\[.*?\]\]", re.DOTALL)
 # attribute argument lists nest parens (``aligned(8)`` etc.).
 _GCC_ATTR_RE = re.compile(r"__attribute__\s*\(\s*\(", re.IGNORECASE)
 
+# DOS-era keyword qualifiers (memory model, calling conventions,
+# function attributes) that the legacy uc_core parser silently
+# absorbed. Period MS-C / Borland / Watcom headers spray these
+# everywhere and they have no meaning under flat-32 / Z80, so we
+# erase them at the source level — the plox grammar then doesn't
+# have to model each variant.
+_DOS_QUALIFIER_RE = re.compile(
+    # Underscore-prefixed forms are always strippable — never used as
+    # identifiers in real code, so no ambiguity. Bare forms (``near``,
+    # ``far``, ``huge``, ``cdecl``, ``pascal``, ...) clash with valid
+    # variable names; gate them on a positive lookahead for another
+    # type-spec/declarator token (whitespace then identifier-start
+    # char or ``*``) so ``int huge = 5;`` keeps ``huge`` intact.
+    r"\b(?:"
+    r"(?:__|_)(?:near|far|huge)"
+    r"|(?:__|_)(?:cs|ds|es|ss|seg)"
+    r"|(?:__|_)(?:cdecl|pascal|stdcall|fastcall|syscall|watcall|fortran)"
+    r"|(?:__|_)(?:interrupt|loadds|saveregs|export)"
+    r"|__extension__"
+    r")\b"
+    r"|"
+    r"\b(?:near|far|huge|cdecl|pascal|stdcall|fastcall|syscall|watcall"
+    r"|fortran|interrupt)\b(?=\s+[A-Za-z_*])"
+)
+# ``__based(seg)`` / ``__Seg16(...)`` — keyword followed by a
+# parenthesised argument list to discard along with the keyword.
+_DOS_PAREN_QUALIFIER_RE = re.compile(
+    r"\b(?:__|_)?(?:based|Seg16)\s*\("
+)
+
 
 def _strip_attributes(source: str) -> str:
     """Strip C23 ``[[...]]`` and GCC ``__attribute__((...))`` attribute
-    specifiers. Both are erased from the token stream by the legacy
+    specifiers, plus DOS-era qualifier keywords (near/far/huge/__cdecl/
+    etc.). All of these are erased from the token stream by the legacy
     front-end; we keep that contract here so the plox grammar doesn't
-    have to model them."""
+    have to model them.
+
+    Handles ``__attribute__((vector_size(N)))`` specially: rather than
+    erasing it, rewrite the surrounding declarator into an equivalent
+    ``T name[N/sizeof(T)]`` array shape so codegen can lay out the
+    storage. uc386 backends key on the array element type and count;
+    the ``is_vector`` flag legacy carried isn't reproduced here, but
+    the storage layout is identical, which is what the smoke tests
+    assert."""
+    source = _rewrite_vector_size(source)
     source = _C23_ATTR_RE.sub("", source)
+    source = _strip_dos_paren_qualifiers(source)
+    source = _DOS_QUALIFIER_RE.sub("", source)
     out = []
     i = 0
     n = len(source)
@@ -358,6 +401,72 @@ def _strip_attributes(source: str) -> str:
             elif c == "'":
                 in_chr = True
             elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            j += 1
+        i = j
+    return "".join(out)
+
+
+_BUILTIN_ELEM_SIZES = {
+    "char": 1, "signed char": 1, "unsigned char": 1,
+    "short": 2, "unsigned short": 2, "signed short": 2,
+    "int": 4, "unsigned int": 4, "signed int": 4, "unsigned": 4, "signed": 4,
+    "long": 4, "unsigned long": 4, "signed long": 4,
+    "long long": 8, "unsigned long long": 8, "signed long long": 8,
+    "float": 4, "double": 8, "long double": 8,
+}
+
+_VECTOR_SIZE_RE = re.compile(
+    r"\b((?:typedef\s+)?"
+    r"(?:(?:unsigned|signed)\s+)?"
+    r"(?:char|short|int|long(?:\s+long)?|float|double))"
+    r"\s+([A-Za-z_]\w*)"
+    r"\s*__attribute__\s*\(\s*\(\s*(?:__)?vector_size(?:__)?"
+    r"\s*\(\s*(\d+)\s*\)\s*\)\s*\)"
+)
+
+
+def _rewrite_vector_size(source: str) -> str:
+    def repl(m: re.Match) -> str:
+        type_part = m.group(1)
+        name = m.group(2)
+        n_bytes = int(m.group(3))
+        elem_type = type_part
+        if elem_type.startswith("typedef "):
+            elem_type = elem_type[len("typedef ") :]
+        elem_type = " ".join(elem_type.split())
+        elem_size = _BUILTIN_ELEM_SIZES.get(elem_type, 4)
+        count = n_bytes // elem_size if elem_size else 0
+        # Record the declarator name so the converter can flip
+        # ``is_vector=True`` on the resulting ArrayType.
+        _vector_names.add(name)
+        if count <= 0:
+            return f"{type_part} {name}"
+        return f"{type_part} {name}[{count}]"
+
+    return _VECTOR_SIZE_RE.sub(repl, source)
+
+
+def _strip_dos_paren_qualifiers(source: str) -> str:
+    """Erase ``__based(seg)`` / ``__Seg16(...)`` style qualifiers,
+    keyword and argument list together. The argument list nests
+    parens, so we count them by hand."""
+    out: list[str] = []
+    i = 0
+    n = len(source)
+    while i < n:
+        m = _DOS_PAREN_QUALIFIER_RE.match(source, i)
+        if not m:
+            out.append(source[i])
+            i += 1
+            continue
+        depth = 1
+        j = m.end()
+        while j < n and depth > 0:
+            c = source[j]
+            if c == "(":
                 depth += 1
             elif c == ")":
                 depth -= 1
@@ -455,6 +564,7 @@ def _flatten_alt_list(node: ParseNode, list_kind: str) -> list:
 # function in the file. Single-threaded use; not safe across threads
 # without external locking.
 _typedefs: dict[str, ast.TypeNode] = {}
+_vector_names: set[str] = set()
 
 
 def _convert_translation_unit(root: ParseNode, filename: str) -> ast.TranslationUnit:
@@ -466,7 +576,24 @@ def _convert_translation_unit(root: ParseNode, filename: str) -> ast.Translation
     for it in items:
         for d in _convert_top_item(it, filename):
             decls.append(d)
+    if _vector_names:
+        _mark_vector_arraytypes(decls)
     return ast.TranslationUnit(declarations=decls, location=_loc(root, filename))
+
+
+def _mark_vector_arraytypes(decls: list[ast.Declaration]) -> None:
+    """Set ``is_vector=True`` on the outer ArrayType of every decl
+    whose name was rewritten from ``__attribute__((vector_size(N)))``.
+    The rewrite happens in source-text form (we can't tell GCC vector
+    arrays from plain C arrays from grammar alone), so we re-tag
+    matching nodes here."""
+    for d in decls:
+        name = getattr(d, "name", None)
+        if name is None or name not in _vector_names:
+            continue
+        ty = getattr(d, "var_type", None) or getattr(d, "target_type", None)
+        if isinstance(ty, ast.ArrayType):
+            ty.is_vector = True
 
 
 def _convert_top_item(node: ParseNode, filename: str) -> list[ast.Declaration]:
@@ -605,6 +732,16 @@ def _convert_decl_specs(
             if ts_kind == "KW_UNSIGNED":
                 is_unsigned = True
                 continue
+            if ts_kind == "KW_INT128":
+                # GCC built-in 128-bit integer extension. uc386 codegen
+                # keys on the canonical name ``int128`` (no underscores)
+                # to pick a 16-byte slot; ``__uint128_t`` carries
+                # implicit unsignedness.
+                tname = _tok_text(ts_inner)
+                if tname == "__uint128_t":
+                    is_unsigned = True
+                type_words.append("int128")
+                continue
             if ts_kind == "KW_COMPLEX":
                 type_words.append("_Complex")
                 continue
@@ -612,7 +749,9 @@ def _convert_decl_specs(
                 type_words.append("_Imaginary")
                 continue
             if ts_kind in ("KW_DECIMAL32", "KW_DECIMAL64", "KW_DECIMAL128"):
-                type_words.append(_tok_text(ts_inner))
+                # uc_core doesn't model decimal float types; map to
+                # the closest binary float so codegen can lay them out.
+                type_words.append("float" if ts_kind == "KW_DECIMAL32" else "double")
                 continue
             if ts_kind == "KW_BITINT":
                 # _BitInt(N) — uc_core represents as BasicType('_BitInt')
@@ -653,6 +792,19 @@ def _convert_decl_specs(
     # wins; otherwise we combine the accumulated ``type_words`` with
     # signed-/unsigned-ness into a BasicType.
     if type_node is None:
+        if "_Complex" in type_words:
+            # `_Complex T` becomes ComplexType, not BasicType.
+            base_words = [w for w in type_words if w != "_Complex"]
+            if not base_words:
+                base_words = ["double"]  # `_Complex` alone == _Complex double
+            base_name = " ".join(base_words).replace(" int", "").strip() or "double"
+            type_node = ast.ComplexType(
+                base_type=base_name,
+                is_const=is_const,
+                is_volatile=is_volatile,
+                location=_loc(node, filename),
+            )
+            return type_node, storage, is_inline
         if not type_words and (is_signed is not None or is_unsigned):
             type_words = ["int"]  # `signed` / `unsigned` alone == int
         if not type_words:
@@ -1284,7 +1436,15 @@ def _convert_block_item(node: ParseNode, filename: str) -> list:
     if inner.kind == "declaration":
         return _convert_declaration(inner, filename)
     if inner.kind == "stmt":
-        return [_convert_stmt(inner, filename)]
+        s = _convert_stmt(inner, filename)
+        # Splice trailing declarations stashed by ``label: declaration``
+        # so they land in the enclosing block's scope.
+        trailing = getattr(s, "__uc_core_trailing_decls", None) or s.__dict__.pop(
+            "__uc_core_trailing_decls", None
+        ) if hasattr(s, "__dict__") else None
+        if trailing:
+            return [s] + list(trailing)
+        return [s]
     return []  # static_assert / asm — drop
 
 
@@ -1306,7 +1466,22 @@ def _convert_matched_or_unmatched(
         # IDENT COLON stmt | KW_CASE expr COLON stmt | KW_DEFAULT COLON stmt
         if _is_token(cs[0], "IDENT"):
             label = _tok_text(cs[0])
-            inner = _convert_matched_or_unmatched(cs[2], filename)
+            tail = cs[2]
+            if isinstance(tail, ParseNode) and tail.kind == "declaration":
+                # C23: ``label: declaration``. The declaration must
+                # remain in the enclosing block's scope, not in a
+                # newly introduced one. Stash the converted decls on
+                # the LabelStmt so the surrounding block-items walk
+                # can splice them in after the label.
+                decls = _convert_declaration(tail, filename)
+                stmt = ast.LabelStmt(
+                    label=label,
+                    stmt=ast.ExpressionStmt(expr=None, location=_loc(node, filename)),
+                    location=_loc(node, filename),
+                )
+                stmt.__dict__["__uc_core_trailing_decls"] = list(decls)
+                return stmt
+            inner = _convert_matched_or_unmatched(tail, filename)
             return ast.LabelStmt(label=label, stmt=inner, location=_loc(node, filename))
         if _is_token(cs[0], "KW_CASE"):
             value = _convert_expr(cs[1], filename)
@@ -1580,6 +1755,38 @@ def _convert_arg_list(node: ParseNode, filename: str) -> list[ast.Expression]:
     return out
 
 
+def _convert_offsetof_designator(
+    node: ParseNode, filename: str
+) -> ast.Expression:
+    """``offsetof_designator : IDENT | designator . IDENT | designator [ expr ]``
+
+    Returns a Member/Index chain rooted at a synthetic
+    ``Identifier(name='__offsetof_root')`` so codegen can walk it to
+    compute the byte offset (matching the legacy parser's encoding).
+    """
+    cs = node.children
+    if len(cs) == 1:
+        # Bare IDENT — root member of the target struct.
+        return ast.Member(
+            obj=ast.Identifier(name="__offsetof_root", location=_loc(node, filename)),
+            member=_tok_text(cs[0]),
+            is_arrow=False,
+            location=_loc(node, filename),
+        )
+    inner = _convert_offsetof_designator(cs[0], filename)
+    if _is_token(cs[1], "DOT"):
+        return ast.Member(
+            obj=inner, member=_tok_text(cs[2]), is_arrow=False,
+            location=_loc(node, filename),
+        )
+    # LBRACKET expr RBRACKET
+    return ast.Index(
+        array=inner,
+        index=_convert_expr(cs[2], filename),
+        location=_loc(node, filename),
+    )
+
+
 def _convert_primary_expr(node: ParseNode, filename: str) -> ast.Expression:
     cs = node.children
     if len(cs) == 1:
@@ -1600,8 +1807,11 @@ def _convert_primary_expr(node: ParseNode, filename: str) -> ast.Expression:
             )
         if head_kind == "FLOAT_LIT":
             text = _tok_text(head)
-            value, is_float = _parse_float_lit(text)
-            return ast.FloatLiteral(value=value, is_float=is_float, location=_loc(node, filename))
+            value, is_float, is_imag = _parse_float_lit(text)
+            return ast.FloatLiteral(
+                value=value, is_float=is_float, is_imaginary=is_imag,
+                location=_loc(node, filename),
+            )
         if head_kind == "CHAR_LIT":
             return ast.CharLiteral(value=_parse_char_lit(_tok_text(head)), location=_loc(node, filename))
         if head_kind == "STRING_LIT":
@@ -1621,6 +1831,20 @@ def _convert_primary_expr(node: ParseNode, filename: str) -> ast.Expression:
             body = _convert_compound_stmt(inner, filename)
             return ast.StmtExpr(body=body, location=_loc(node, filename))
         return _convert_expr(inner, filename)
+    if _is_token(cs[0], "KW_VA_ARG"):
+        ap = _convert_expr(cs[2], filename)
+        target_type = _convert_type_name(cs[4], filename)
+        return ast.VaArgExpr(
+            ap=ap, target_type=target_type, location=_loc(node, filename),
+        )
+    if _is_token(cs[0], "KW_OFFSETOF"):
+        target_type = _convert_type_name(cs[2], filename)
+        designator = _convert_offsetof_designator(cs[4], filename)
+        return ast.OffsetofExpr(
+            target_type=target_type,
+            designator=designator,
+            location=_loc(node, filename),
+        )
     if _is_token(cs[0], "KW_GENERIC"):
         # KW_GENERIC LPAREN assignment_expr COMMA generic_assoc_list RPAREN
         controlling = _convert_expr(cs[2], filename)
@@ -1687,13 +1911,18 @@ def _parse_int_lit(text: str) -> tuple[int, bool, bool, bool, bool]:
     return value, is_long, is_long_long, is_unsigned, is_hex
 
 
-def _parse_float_lit(text: str) -> tuple[float, bool]:
-    """Parse a C floating literal. Returns (value, is_float).
+def _parse_float_lit(text: str) -> tuple[float, bool, bool]:
+    """Parse a C floating literal. Returns (value, is_float, is_imaginary).
 
     Strips the suffix; ``f``/``F`` sets is_float, ``l``/``L`` is double
-    width but uc_core lumps it under ``is_float=False``."""
+    width but uc_core lumps it under ``is_float=False``. A trailing
+    ``i``/``I``/``j``/``J`` (GCC imaginary literal) sets is_imaginary."""
     s = text
     is_float = False
+    is_imaginary = False
+    if s and s[-1] in "iIjJ":
+        is_imaginary = True
+        s = s[:-1]
     if s and s[-1] in "fF":
         is_float = True
         s = s[:-1]
@@ -1701,7 +1930,7 @@ def _parse_float_lit(text: str) -> tuple[float, bool]:
         s = s[:-1]
     elif s and len(s) >= 2 and s[-2:].lower() in ("df", "dd", "dl"):
         s = s[:-2]
-    return float(s), is_float
+    return float(s), is_float, is_imaginary
 
 
 def _parse_char_lit(text: str) -> int:

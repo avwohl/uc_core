@@ -32,8 +32,7 @@ pip install -e .
 ## Usage from a backend
 
 ```python
-from uc_core.lexer import Lexer
-from uc_core.parser import Parser
+from uc_core.frontend import parse
 from uc_core.preprocessor import Preprocessor
 from uc_core.ast_optimizer import ASTOptimizer
 from uc_core.backend import CodeGenerator  # Protocol
@@ -47,13 +46,17 @@ predefines = {
 
 pp = Preprocessor(include_paths=["lib/include"], target_predefines=predefines)
 source = pp.preprocess(open("hello.c").read(), "hello.c")
-tokens = list(Lexer(source, "hello.c").tokenize())
-ast = Parser(tokens).parse()
+ast = parse(source, "hello.c")
 ast = ASTOptimizer(opt_level=3).optimize(ast)
 
 # Backend is provided by the target package (uc80, uc386, ...)
 # It must implement uc_core.backend.CodeGenerator
 ```
+
+The front-end is plox-driven: `uc_core/frontend.py` runs the lexer
++ LR(1) parser produced from `plox/examples/c23.plox` and lowers the
+parse tree into `uc_core/ast.py` dataclasses. The pre-built tables
+ship as `uc_core/data/c23.json`.
 
 ## Related Projects
 

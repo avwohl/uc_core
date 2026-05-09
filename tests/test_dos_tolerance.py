@@ -8,14 +8,14 @@ to not choke on them.
 
 import pytest
 
-from uc_core.lexer import Lexer
-from uc_core.parser import Parser
+from uc_core.frontend import parse as _frontend_parse
+from uc_core.preprocessor import Preprocessor
 from uc_core import ast
 
 
 def _parse(src: str) -> ast.TranslationUnit:
-    tokens = list(Lexer(src, "t.c").tokenize())
-    return Parser(tokens).parse()
+    pre = Preprocessor().preprocess(src, "t.c")
+    return _frontend_parse(pre, "t.c")
 
 
 # Each case is a complete translation unit that must parse without error.

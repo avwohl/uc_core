@@ -8,8 +8,7 @@ according to config (not hardcoded 16-bit).
 import pytest
 
 from uc_core.type_config import TypeConfig, Z80_CPM, WATCOM_FLAT32
-from uc_core.lexer import Lexer
-from uc_core.parser import Parser
+from uc_core.frontend import parse
 from uc_core.preprocessor import Preprocessor
 from uc_core.ast_optimizer import ASTOptimizer
 from uc_core import ast
@@ -67,8 +66,7 @@ def test_predefined_macros_bundle():
 def _compile_and_fold(src: str, tc: TypeConfig) -> ast.TranslationUnit:
     pp = Preprocessor(target_predefines=tc.predefined_macros())
     pre = pp.preprocess(src, "t.c")
-    tokens = list(Lexer(pre, "t.c").tokenize())
-    unit = Parser(tokens).parse()
+    unit = parse(pre, "t.c")
     return ASTOptimizer(3, type_config=tc).optimize(unit)
 
 

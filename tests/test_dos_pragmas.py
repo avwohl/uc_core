@@ -7,8 +7,7 @@ the token stream. `#pragma pack` and `#pragma printf/scanf` remain honored.
 
 import pytest
 
-from uc_core.lexer import Lexer
-from uc_core.parser import Parser
+from uc_core.frontend import parse
 from uc_core.preprocessor import Preprocessor
 
 
@@ -43,8 +42,7 @@ def test_pragma_drops_silently(label, pragma):
     pp = Preprocessor()
     out = pp.preprocess(src, "t.c")
     # Parser must see only the real declaration
-    tokens = list(Lexer(out, "t.c").tokenize())
-    unit = Parser(tokens).parse()
+    unit = parse(out, "t.c")
     assert len(unit.declarations) == 1
     assert unit.declarations[0].name == "x"
 
@@ -55,8 +53,7 @@ def test_pragma_pack_still_honored():
     pp = Preprocessor()
     out = pp.preprocess(src, "t.c")
     # It shouldn't error, and the declaration should still parse
-    tokens = list(Lexer(out, "t.c").tokenize())
-    unit = Parser(tokens).parse()
+    unit = parse(out, "t.c")
     assert len(unit.declarations) == 1
 
 

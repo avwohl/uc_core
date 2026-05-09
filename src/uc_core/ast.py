@@ -2,7 +2,17 @@
 
 from dataclasses import dataclass, field
 from typing import Optional, Union
-from .tokens import SourceLocation
+
+
+@dataclass
+class SourceLocation:
+    """Location in source file."""
+    filename: str
+    line: int
+    column: int
+
+    def __str__(self) -> str:
+        return f"{self.filename}:{self.line}:{self.column}"
 
 
 @dataclass(kw_only=True)
