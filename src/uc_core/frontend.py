@@ -1908,6 +1908,17 @@ def _parse_int_lit(text: str) -> tuple[int, bool, bool, bool, bool]:
         is_hex = True  # octal also gets is_hex per legacy convention
     else:
         value = int(s)
+    # C 6.4.4.1: an integer literal's type is the smallest type that
+    # holds the value, ordered by suffix-determined candidate list.
+    # We only model the long-long promotion here — anything bigger than
+    # 32 bits can't be represented as int/long on any uc_* target, so
+    # bump is_long_long to keep the codegen on the 64-bit path. Without
+    # this, a literal like 0xabcd00000000 keeps is_long_long=False, and
+    # uc386's eax-only path silently truncates to its lower 32 bits
+    # (= 0). Suffix-derived flags win — don't downgrade them.
+    if not is_long_long and value > 0xFFFFFFFF:
+        is_long_long = True
+        is_long = True
     return value, is_long, is_long_long, is_unsigned, is_hex
 
 
