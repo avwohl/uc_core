@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import cast
@@ -77,6 +78,13 @@ def parse(
     to a syntax error in declarator position.
     """
     _vector_names.clear()
+    # AST flatten/visit walks recurse linearly over left-recursive lists
+    # (declaration_list, statement_list, ...). Default Python limit
+    # (1000) overflows on ~600-item TUs (post-preprocessing for any
+    # non-trivial file pulling in stdlib headers). Bump only if the
+    # caller hasn't set something higher already.
+    if sys.getrecursionlimit() < 50_000:
+        sys.setrecursionlimit(50_000)
     pre = _strip_attributes(source)
     scanner, table = _load_c23()
 
@@ -148,6 +156,15 @@ _DECL_TERMINATORS = frozenset({
     "SEMI", "COMMA", "ASSIGN", "LBRACKET", "LPAREN", "RPAREN",
 })
 
+# Subset that's safe inside a struct/union body. C struct members
+# are declared as ``T NAME ;``, ``T NAME, NAME2 ;``, or ``T NAME[N] ;``
+# — never ``T NAME(...)``, since C doesn't have member functions.
+# Inside a struct body, IDENT followed by LPAREN is the type-name
+# of a function-pointer field (``T (*fn)(...)``) — the IDENT is the
+# TYPE, not the field name. Excluding LPAREN/RPAREN/ASSIGN here keeps
+# such type-names rewriteable to TYPEDEF_NAME.
+_MEMBER_DECL_TERMINATORS = frozenset({"SEMI", "COMMA", "LBRACKET"})
+
 
 def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
     """Pre-scan ``pre`` and return the set of IDENT offsets that the
@@ -161,6 +178,12 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
     tokens = list(scanner.scan(pre))
     # Stack of locally-declared name sets, one per brace scope.
     scopes: list[set[str]] = [set()]
+    # Names from a parameter list awaiting attachment to the next
+    # LBRACE-pushed scope (the function body). C parameter scope and
+    # function-body scope are technically separate but for typedef-
+    # shadowing purposes share the same names — `int byte` shadows a
+    # file-scope `typedef ... byte` everywhere inside the body.
+    pending_params: set[str] = set()
     n = len(tokens)
     i = 0
 
@@ -171,7 +194,9 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
         tok = tokens[i]
         name = tok.name
         if name == "LBRACE":
-            scopes.append(set())
+            new_scope = set(pending_params)
+            pending_params = set()
+            scopes.append(new_scope)
             i += 1
             continue
         if name == "RBRACE":
@@ -229,7 +254,9 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
             j = i
             top_level_idents: list = []  # only at brace_depth 0
             inner_idents: list = []      # declarators inside tag bodies
+            param_idents: list = []      # parameter names at paren_depth 1
             is_typedef = False
+            ends_at_lbrace = False
             while j < n:
                 t = tokens[j]
                 tn = t.name
@@ -237,6 +264,20 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
                     paren_depth += 1
                 elif tn == "RPAREN":
                     paren_depth -= 1
+                    # If we've gone past the closing paren of an enclosing
+                    # parameter list (i.e. this walk started inside one),
+                    # we've exited the original declaration's scope. Stop
+                    # before the walk drifts into a sibling declaration
+                    # and mis-tags one of its IDENTs as a declarator.
+                    # Concretely: `T fn(int);\nvoid g(T);` triggers a
+                    # walk on the inner `int` because the leading `T`
+                    # appears as IDENT pre-filter. Without this guard,
+                    # the walk runs out of the parameter list, into
+                    # `void g(T);`, sees `T` at the next paren_depth==0,
+                    # and adds it to the keep-set — which then
+                    # suppresses the typedef-name rewrite at parse time.
+                    if paren_depth < 0:
+                        break
                 elif tn == "LBRACE":
                     prev = tokens[j - 1].name if j > 0 else None
                     prev_prev = tokens[j - 2].name if j > 1 else None
@@ -246,6 +287,7 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
                         or brace_depth > 0
                     )
                     if not is_tag_body and brace_depth == 0:
+                        ends_at_lbrace = True
                         break
                     brace_depth += 1
                 elif tn == "RBRACE":
@@ -259,6 +301,21 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
                 ):
                     break
                 elif (
+                    paren_depth == 1
+                    and brace_depth == 0
+                    and tn == "IDENT"
+                    and j + 1 < n
+                    and tokens[j + 1].name in {"COMMA", "RPAREN"}
+                ):
+                    # Parameter name in the OUTERMOST parameter list
+                    # of the declaration we're walking. We want these
+                    # iff the walk ends at a function body LBRACE,
+                    # because inside the body these names shadow
+                    # any same-text typedef. Forward-decl declarations
+                    # (`T fn(int byte);`) end at SEMI and the names
+                    # are throwaway, so the queue gets dropped.
+                    param_idents.append(t)
+                elif (
                     paren_depth == 0
                     and tn == "IDENT"
                     and j + 1 < n
@@ -266,11 +323,21 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
                 ):
                     if brace_depth == 0:
                         top_level_idents.append(t)
-                    else:
+                    elif tokens[j + 1].name in _MEMBER_DECL_TERMINATORS:
                         # Member declarator inside a struct/union body.
                         # Members live in a separate namespace, so the
                         # IDENT must not be rewritten to TYPEDEF_NAME
                         # when its text shadows a typedef.
+                        # We keep a narrower terminator set than top
+                        # level: in a struct body `T (*fn)();` shows up
+                        # as IDENT(`T`) LPAREN — that LPAREN is a
+                        # grouping paren, not a parameter-list start
+                        # for `T`, so `T` is the field's TYPE not its
+                        # name. Same for IDENT followed by RPAREN
+                        # (terminating a function-pointer parameter
+                        # list, where the IDENT is the parameter
+                        # name — handled by the outer parameter walk
+                        # if needed, but never the struct member).
                         inner_idents.append(t)
                 # Tag IDENTs inside the body: ``struct INNER {`` —
                 # mark INNER as tag, since uplox's typedef tracker
@@ -294,6 +361,12 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
                 for ident_tok in top_level_idents:
                     scopes[-1].add(ident_tok.text)
                     keep.add(ident_tok.offset)
+                if ends_at_lbrace:
+                    # Function definition — parameter names live in the
+                    # function-body scope. Queue for the next LBRACE.
+                    for ident_tok in param_idents:
+                        pending_params.add(ident_tok.text)
+                        keep.add(ident_tok.offset)
             i = j  # resume at SEMI/LBRACE; the LBRACE branch above
                    # will push a new scope on the next iteration.
             continue
@@ -406,7 +479,15 @@ def _strip_attributes(source: str) -> str:
                 depth -= 1
             j += 1
         i = j
-    return "".join(out)
+    result = "".join(out)
+    # The lexer has DOUBLE_LBRACKET / DOUBLE_RBRACKET tokens for the
+    # C23 attribute syntax. Any `[[` or `]]` that wasn't already
+    # stripped above (i.e. didn't form a balanced attribute pair) is
+    # genuine adjacent bracketing — `arr[i[j]]`, `(int[2]){...}`,
+    # `((int *)x)[arr[i]]`, etc. Insert a space so the lexer's
+    # longest-match doesn't grab the pair as the attribute token, which
+    # the grammar has no rule for once attributes are stripped.
+    return result.replace("]]", "] ]").replace("[[", "[ [")
 
 
 _BUILTIN_ELEM_SIZES = {
@@ -597,9 +678,14 @@ def _mark_vector_arraytypes(decls: list[ast.Declaration]) -> None:
 
 
 def _convert_top_item(node: ParseNode, filename: str) -> list[ast.Declaration]:
-    """top_item : function_definition | declaration | static_assert_declaration | asm_declaration"""
+    """top_item : function_definition | declaration | static_assert_declaration | asm_declaration | SEMI"""
     inner = node.children[0]
-    assert isinstance(inner, ParseNode)
+    if not isinstance(inner, ParseNode):
+        # Stray SEMI at file scope — produced by empty macro expansions
+        # like `MP_REGISTER_EXTENSIBLE_MODULE(...);` where the macro is
+        # defined as nothing. Standard C99/C11/C23 doesn't strictly
+        # allow this but every mainstream compiler tolerates it.
+        return []
     if inner.kind == "function_definition":
         return [_convert_function_definition(inner, filename)]
     if inner.kind == "declaration":
