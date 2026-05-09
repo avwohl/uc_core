@@ -1,4 +1,4 @@
-"""plox-driven C23 front-end for uc_core.
+"""uplox-driven C23 front-end for uc_core.
 
 Public entry: :func:`parse`. Takes already-preprocessed C source —
 the per-compiler preprocessor (uc_core, uc80, uc386 each instantiate
@@ -8,10 +8,10 @@ upstream, mirroring the legacy ``Lexer`` + ``Parser`` contract.
 Internal pipeline:
 
 1. ``_strip_attributes`` — strip C23 ``[[...]]`` and GCC
-   ``__attribute__((...))`` from the source text. plox's c23
+   ``__attribute__((...))`` from the source text. uplox's c23
    grammar doesn't model attributes; the legacy parser had its own
    ``_skip_gcc_attribute`` shim that erased them after the lexer.
-2. plox c23 LR(1) parse — produces a ``ParseNode`` tree. A
+2. uplox c23 LR(1) parse — produces a ``ParseNode`` tree. A
    :class:`TypedefTracker` runs as a token filter / declaration hook
    so identifier references to typedef'd names lex as ``TYPEDEF_NAME``
    in cast / type-spec position.
@@ -21,7 +21,7 @@ Internal pipeline:
    per-backend codegens consume the same shape unchanged.
 
 The JSON bundle at ``uc_core/data/c23.json`` is built from
-``plox/examples/c23.plox`` via ``plox build`` and loaded once per
+``uplox/examples/c23.uplox`` via ``uplox build`` and loaded once per
 process (~70 ms vs ~25 s to build the LR(1) table from grammar
 source).
 """
@@ -34,10 +34,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from plox.hooks import TypedefTracker
-from plox.lex.scanner import Scanner, Token
-from plox.parse.runtime import HookRegistry, ParseNode, parse as _plox_parse
-from plox.tables import balanced_from_json, dfa_from_json, table_from_json
+from uplox.hooks import TypedefTracker
+from uplox.lex.scanner import Scanner, Token
+from uplox.parse.runtime import HookRegistry, ParseNode, parse as _uplox_parse
+from uplox.tables import balanced_from_json, dfa_from_json, table_from_json
 
 from . import ast
 from .ast import SourceLocation
@@ -94,7 +94,7 @@ def parse(
     # IDENT sits in tag position — i.e. ``struct``/``union``/``enum``
     # followed only by whitespace then an identifier. The set is
     # consulted by the lexer-feedback filter; doing it as a single
-    # regex pass sidesteps plox's repeated filter calls during LR
+    # regex pass sidesteps uplox's repeated filter calls during LR
     # reduction attempts (the offset is fixed in the source even when
     # the same token is re-presented).
     # Pre-scan: walk the lexed token stream once and compute which
@@ -118,7 +118,7 @@ def parse(
             return tok  # tag namespace; do not rewrite
         return tracker.filter(ctx, tok)
 
-    tree = _plox_parse(
+    tree = _uplox_parse(
         table,
         scanner.scan(pre),
         hooks=hooks,
@@ -273,7 +273,7 @@ def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
                         # when its text shadows a typedef.
                         inner_idents.append(t)
                 # Tag IDENTs inside the body: ``struct INNER {`` —
-                # mark INNER as tag, since plox's typedef tracker
+                # mark INNER as tag, since uplox's typedef tracker
                 # would otherwise rewrite the tag name when it
                 # collides with an outer typedef.
                 elif (
@@ -322,7 +322,7 @@ _GCC_ATTR_RE = re.compile(r"__attribute__\s*\(\s*\(", re.IGNORECASE)
 # function attributes) that the legacy uc_core parser silently
 # absorbed. Period MS-C / Borland / Watcom headers spray these
 # everywhere and they have no meaning under flat-32 / Z80, so we
-# erase them at the source level — the plox grammar then doesn't
+# erase them at the source level — the uplox grammar then doesn't
 # have to model each variant.
 _DOS_QUALIFIER_RE = re.compile(
     # Underscore-prefixed forms are always strippable — never used as
@@ -353,7 +353,7 @@ def _strip_attributes(source: str) -> str:
     """Strip C23 ``[[...]]`` and GCC ``__attribute__((...))`` attribute
     specifiers, plus DOS-era qualifier keywords (near/far/huge/__cdecl/
     etc.). All of these are erased from the token stream by the legacy
-    front-end; we keep that contract here so the plox grammar doesn't
+    front-end; we keep that contract here so the uplox grammar doesn't
     have to model them.
 
     Handles ``__attribute__((vector_size(N)))`` specially: rather than

@@ -4,11 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uc_core"
-version = "0.3.0"
+version = "0.3.1"
 description = "Shared C23 frontend and AST optimizer for the uc80/uc386 family of retro C compilers"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.10"
+dependencies = [
+    "uplox>=2.0.0",
+]
 authors = [
     {name = "uc_core developers"}
 ]
