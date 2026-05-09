@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uc_core"
-version = "0.3.1"
+version = "0.3.2"
 description = "Shared C23 frontend and AST optimizer for the uc80/uc386 family of retro C compilers"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -39,7 +39,7 @@ Issues = "https://github.com/avwohl/uc_core/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-uc_core = ["py.typed"]
+uc_core = ["py.typed", "data/*.json"]
 
 [project.optional-dependencies]
 dev = [
