@@ -84,15 +84,222 @@ def parse(
         tracker.names |= seed_typedefs
     hooks = HookRegistry(ignore_missing=True)
     hooks.register("record_typedef", tracker.record_declaration)
+    # The tracker rewrites IDENT-to-TYPEDEF_NAME purely on token text;
+    # in C, however, the identifier following ``struct`` / ``union`` /
+    # ``enum`` lives in a separate name-space (the tag namespace) and
+    # must NOT be rewritten even when it shadows a typedef of the
+    # same name. ``typedef struct s s; struct s { ... };`` is the
+    # canonical case. Pre-scan the source for every offset where an
+    # IDENT sits in tag position — i.e. ``struct``/``union``/``enum``
+    # followed only by whitespace then an identifier. The set is
+    # consulted by the lexer-feedback filter; doing it as a single
+    # regex pass sidesteps plox's repeated filter calls during LR
+    # reduction attempts (the offset is fixed in the source even when
+    # the same token is re-presented).
+    # Pre-scan: walk the lexed token stream once and compute which
+    # IDENT offsets must NOT be rewritten to TYPEDEF_NAME.  Three
+    # categories carry their own namespaces in C:
+    #
+    #   * tag namespace      — IDENT after ``struct``/``union``/``enum``
+    #   * label namespace    — IDENT before ``:`` or after ``goto``
+    #   * declarator names   — IDENT introduced by a non-typedef
+    #     declaration in some enclosing scope; subsequent uses of the
+    #     same name within that scope shadow any typedef of that name.
+    #
+    # The walk maintains a brace-depth stack of locally-declared
+    # identifier names. For each IDENT use whose name lives in any
+    # active stack frame, the offset is added to ``tag_idents`` so the
+    # token filter leaves it as IDENT.
+    tag_idents: set[int] = _compute_keep_ident_offsets(pre, scanner)
+
+    def _filter(ctx, tok):
+        if tok.name == "IDENT" and tok.offset in tag_idents:
+            return tok  # tag namespace; do not rewrite
+        return tracker.filter(ctx, tok)
+
     tree = _plox_parse(
         table,
         scanner.scan(pre),
         hooks=hooks,
-        token_filter=tracker.filter,
+        token_filter=_filter,
     )
     if not isinstance(tree, ParseNode):
         raise RuntimeError("c23 parse returned non-ParseNode")
     return _convert_translation_unit(tree, filename)
+
+
+_BUILTIN_TYPE_KW = frozenset({
+    "KW_VOID", "KW_CHAR", "KW_SHORT", "KW_INT", "KW_LONG",
+    "KW_FLOAT", "KW_DOUBLE", "KW_SIGNED", "KW_UNSIGNED",
+    "KW_BOOL", "KW_COMPLEX", "KW_BITINT",
+    "KW_DECIMAL32", "KW_DECIMAL64", "KW_DECIMAL128",
+    # Type qualifiers / storage classes that legitimately precede a
+    # declarator without changing the namespace of the trailing IDENT.
+    "KW_CONST", "KW_VOLATILE", "KW_RESTRICT", "KW_ATOMIC",
+    "KW_STATIC", "KW_EXTERN", "KW_AUTO", "KW_REGISTER",
+    "KW_INLINE", "KW_NORETURN", "KW_THREAD_LOCAL",
+    "KW_CONSTEXPR", "KW_TYPEDEF", "TYPEDEF_NAME",
+})
+
+_TAG_KW = frozenset({"KW_STRUCT", "KW_UNION", "KW_ENUM"})
+
+_DECL_TERMINATORS = frozenset({
+    "SEMI", "COMMA", "ASSIGN", "LBRACKET", "LPAREN", "RPAREN",
+})
+
+
+def _compute_keep_ident_offsets(pre: str, scanner) -> set[int]:
+    """Pre-scan ``pre`` and return the set of IDENT offsets that the
+    typedef filter must leave alone — tag/label/declarator names that
+    shadow some typedef of the same text.
+
+    The implementation is a single-pass walk over the lexed token
+    stream maintaining a stack of brace-scoped declared names.
+    """
+    keep: set[int] = set()
+    tokens = list(scanner.scan(pre))
+    # Stack of locally-declared name sets, one per brace scope.
+    scopes: list[set[str]] = [set()]
+    n = len(tokens)
+    i = 0
+
+    def name_in_scopes(name: str) -> bool:
+        return any(name in s for s in scopes)
+
+    while i < n:
+        tok = tokens[i]
+        name = tok.name
+        if name == "LBRACE":
+            scopes.append(set())
+            i += 1
+            continue
+        if name == "RBRACE":
+            if len(scopes) > 1:
+                scopes.pop()
+            i += 1
+            continue
+        # ``goto IDENT`` — label use.
+        if name == "KW_GOTO" and i + 1 < n and tokens[i + 1].name == "IDENT":
+            keep.add(tokens[i + 1].offset)
+            i += 2
+            continue
+        # ``IDENT :`` at statement-prefix position is a label
+        # definition. The token preceding the IDENT will be SEMI,
+        # LBRACE, RBRACE, or COLON (case label). Restrict to those
+        # contexts to avoid stealing the ``a ? b : c`` ternary or
+        # ``case 1:``.
+        if (
+            name == "IDENT"
+            and i + 1 < n
+            and tokens[i + 1].name == "COLON"
+            and (
+                i == 0
+                or tokens[i - 1].name in {"SEMI", "LBRACE", "RBRACE", "COLON"}
+            )
+        ):
+            keep.add(tok.offset)
+            i += 1
+            continue
+        # ``struct|union|enum IDENT`` — tag. Mark the tag IDENT and
+        # fall through so the same ``struct …`` token can also seed
+        # the declaration walk below (``struct s s;``).
+        if name in _TAG_KW and i + 1 < n and tokens[i + 1].name == "IDENT":
+            keep.add(tokens[i + 1].offset)
+        # Declaration: a run of decl-specifier tokens followed by one
+        # or more declarators. We detect this by spotting a built-in
+        # type / qualifier / storage class as the first token after a
+        # statement separator, then scanning forward through tokens
+        # capturing every IDENT that sits at declarator position
+        # (i.e. immediately followed by SEMI/COMMA/ASSIGN/LBRACKET/
+        # LPAREN/RPAREN). Any such IDENT shadows a typedef of the
+        # same name within the current scope.
+        if name in _BUILTIN_TYPE_KW or name in _TAG_KW:
+            # Walk forward until SEMI at depth 0 (top-level
+            # parentheses + braces). A ``{`` here may be either a
+            # function body OR a struct/union/enum body — function
+            # body terminates the declaration, but a brace right
+            # after a tag-keyword/IDENT belongs to the type spec and
+            # must be skipped. We distinguish by tracking whether the
+            # most recent non-whitespace token before the brace was a
+            # tag keyword, an IDENT directly following a tag keyword,
+            # or an RBRACE (closing a nested struct body).
+            paren_depth = 0
+            brace_depth = 0
+            j = i
+            top_level_idents: list = []  # only at brace_depth 0
+            inner_idents: list = []      # declarators inside tag bodies
+            is_typedef = False
+            while j < n:
+                t = tokens[j]
+                tn = t.name
+                if tn == "LPAREN":
+                    paren_depth += 1
+                elif tn == "RPAREN":
+                    paren_depth -= 1
+                elif tn == "LBRACE":
+                    prev = tokens[j - 1].name if j > 0 else None
+                    prev_prev = tokens[j - 2].name if j > 1 else None
+                    is_tag_body = (
+                        prev in _TAG_KW
+                        or (prev == "IDENT" and prev_prev in _TAG_KW)
+                        or brace_depth > 0
+                    )
+                    if not is_tag_body and brace_depth == 0:
+                        break
+                    brace_depth += 1
+                elif tn == "RBRACE":
+                    brace_depth -= 1
+                elif tn == "KW_TYPEDEF":
+                    is_typedef = True
+                elif (
+                    paren_depth == 0
+                    and brace_depth == 0
+                    and tn == "SEMI"
+                ):
+                    break
+                elif (
+                    paren_depth == 0
+                    and tn == "IDENT"
+                    and j + 1 < n
+                    and tokens[j + 1].name in _DECL_TERMINATORS
+                ):
+                    if brace_depth == 0:
+                        top_level_idents.append(t)
+                    else:
+                        # Member declarator inside a struct/union body.
+                        # Members live in a separate namespace, so the
+                        # IDENT must not be rewritten to TYPEDEF_NAME
+                        # when its text shadows a typedef.
+                        inner_idents.append(t)
+                # Tag IDENTs inside the body: ``struct INNER {`` —
+                # mark INNER as tag, since plox's typedef tracker
+                # would otherwise rewrite the tag name when it
+                # collides with an outer typedef.
+                elif (
+                    tn in _TAG_KW
+                    and j + 1 < n
+                    and tokens[j + 1].name == "IDENT"
+                    and brace_depth > 0
+                ):
+                    keep.add(tokens[j + 1].offset)
+                j += 1
+            for ident_tok in inner_idents:
+                keep.add(ident_tok.offset)
+            # Typedef declarations introduce *typedef* names, not
+            # ordinary-namespace shadows. Leave those alone — the
+            # parse-time hook records them in the tracker after the
+            # reduce, and subsequent uses parse as ``TYPEDEF_NAME``.
+            if not is_typedef:
+                for ident_tok in top_level_idents:
+                    scopes[-1].add(ident_tok.text)
+                    keep.add(ident_tok.offset)
+            i = j  # resume at SEMI/LBRACE; the LBRACE branch above
+                   # will push a new scope on the next iteration.
+            continue
+        if name == "IDENT" and name_in_scopes(tok.text):
+            keep.add(tok.offset)
+        i += 1
+    return keep
 
 
 # ---------------------------------------------------------------------------
@@ -501,9 +708,16 @@ def _convert_struct_or_union(node: ParseNode, filename: str) -> ast.StructType:
     if len(cs) == 2:
         # struct_or_union IDENT — just a tag reference.
         name = _tok_text(cs[1])
+    elif len(cs) == 3:
+        # struct_or_union LBRACE RBRACE — anonymous, empty body (C23).
+        pass
     elif len(cs) == 4:
-        # struct_or_union LBRACE struct_decl_list RBRACE — anonymous
-        members = _convert_struct_decl_list(cs[2], filename)
+        if _is_token(cs[2], "RBRACE"):
+            # struct_or_union IDENT LBRACE RBRACE — empty body.
+            name = _tok_text(cs[1])
+        else:
+            # struct_or_union LBRACE struct_decl_list RBRACE — anonymous
+            members = _convert_struct_decl_list(cs[2], filename)
     elif len(cs) == 5:
         # struct_or_union IDENT LBRACE struct_decl_list RBRACE
         name = _tok_text(cs[1])
@@ -523,12 +737,26 @@ def _convert_struct_decl_list(
     decls = _flatten_list(node, "struct_decl_list", "struct_decl")
     for sd in decls:
         assert isinstance(sd, ParseNode) and sd.kind == "struct_decl"
-        inner = sd.children[0]
+        cs = sd.children
+        inner = cs[0]
         if isinstance(inner, ParseNode) and inner.kind == "static_assert_declaration":
             continue  # ignore static_assert in struct bodies
-        # decl_specs struct_declarator_list SEMI
-        base_type, _, _ = _convert_decl_specs(sd.children[0], filename)
-        sdl = sd.children[1]
+        base_type, _, _ = _convert_decl_specs(cs[0], filename)
+        # Two forms: decl_specs SEMI (anonymous struct/union member) or
+        # decl_specs struct_declarator_list SEMI (one or more named or
+        # bit-field members).
+        if len(cs) == 2 and _is_token(cs[1], "SEMI"):
+            # C11 anonymous struct/union member — single member with
+            # name=None whose type is the (anonymous) struct/union.
+            out.append(
+                ast.StructMember(
+                    name=None,
+                    member_type=base_type,
+                    location=_loc(sd, filename),
+                )
+            )
+            continue
+        sdl = cs[1]
         for sdecl in _flatten_list(sdl, "struct_declarator_list", "struct_declarator"):
             out.append(_convert_struct_declarator(sdecl, base_type, filename))
     return out
@@ -605,11 +833,40 @@ def _convert_declaration(
     if not idl_opt.children:
         return _tag_declaration(base_type, filename)
 
+    # If decl_specs introduced a *named, complete* tag (struct/union/
+    # enum with body), emit a separate tag declaration alongside the
+    # per-declarator nodes. Codegen needs the tag in its registry so
+    # later references like ``struct s s;`` can size the type.
+    out: list[ast.Declaration] = []
+    if (
+        isinstance(base_type, ast.StructType)
+        and base_type.name is not None
+        and base_type.members
+    ):
+        out.append(ast.StructDecl(
+            name=base_type.name,
+            members=base_type.members,
+            is_union=base_type.is_union,
+            is_definition=True,
+            is_packed=base_type.is_packed,
+            location=base_type.location,
+        ))
+    elif (
+        isinstance(base_type, ast.EnumType)
+        and base_type.name is not None
+        and base_type.values
+    ):
+        out.append(ast.EnumDecl(
+            name=base_type.name,
+            values=base_type.values,
+            is_definition=True,
+            location=base_type.location,
+        ))
+
     # Multiple declarators share the base type but get individual
     # declarator-derived shapes / names / inits.
     idl = idl_opt.children[0]
     items = _flatten_list(idl, "init_declarator_list", "init_declarator")
-    out: list[ast.Declaration] = []
     for it in items:
         d = _convert_init_declarator(it, base_type, storage, is_inline, filename)
         if d is not None:
@@ -677,15 +934,18 @@ def _convert_init_declarator(
         )
 
     if isinstance(full_type, ast.FunctionType):
-        params: list[ast.ParamDecl] = full_type.__dict__.pop("__uc_core_params", [])
-        return ast.FunctionDecl(
+        # Function *declarations* (no body, no definition) are emitted
+        # as ``VarDecl(FunctionType)`` to mirror the legacy uc_core
+        # parser. uc80's codegen relies on the distinction: only real
+        # ``FunctionDecl`` nodes get added to ``ctx.function_names`` in
+        # its first pass, so wrapping prototypes as ``VarDecl`` keeps
+        # the per-prototype ``extrn`` emission behaviour.
+        full_type.__dict__.pop("__uc_core_params", None)
+        return ast.VarDecl(
             name=name,
-            return_type=full_type.return_type,
-            params=params,
-            body=None,
-            is_variadic=full_type.is_variadic,
+            var_type=full_type,
+            init=None,
             storage_class=storage,
-            is_inline=is_inline,
             location=_loc(node, filename),
         )
 
@@ -783,10 +1043,17 @@ def _apply_direct_declarator(
     # left-recursive forms
     if isinstance(cs[0], ParseNode) and cs[0].kind == "direct_declarator":
         if _is_token(cs[1], "LBRACKET"):
-            # array
+            # ``LBRACKET type_qualifier_list_opt [conditional_expr] RBRACKET``
+            # — qualifiers (``int x[const 5]``) and size are both
+            # optional. We carry size through; qualifiers on the array
+            # bound itself are dropped (uc_core's ArrayType doesn't
+            # model them — they apply to the implied pointer in
+            # function parameters).
             size: ast.Expression | None = None
-            if len(cs) == 4:
-                size = _convert_expr(cs[2], filename)
+            for child in cs[2:-1]:
+                if isinstance(child, ParseNode) and child.kind != "type_qualifier_list_opt":
+                    size = _convert_expr(child, filename)
+                    break
             inner_type = ast.ArrayType(base_type=base_type, size=size)
             return _apply_direct_declarator(cs[0], inner_type, filename)
         if _is_token(cs[1], "LPAREN"):
@@ -829,6 +1096,17 @@ def _convert_parameter_type_list(
     params: list[ast.ParamDecl] = []
     for p in _flatten_list(plist, "parameter_list", "parameter"):
         params.append(_convert_parameter(p, filename))
+    # ``f(void)`` — single anonymous void parameter — is the C
+    # spelling for ``no parameters``; collapse it so codegen sees
+    # the same shape as ``f()``.
+    if (
+        len(params) == 1
+        and not is_variadic
+        and params[0].name is None
+        and isinstance(params[0].param_type, ast.BasicType)
+        and params[0].param_type.name == "void"
+    ):
+        params = []
     return params, is_variadic
 
 
@@ -846,6 +1124,11 @@ def _convert_parameter(node: ParseNode, filename: str) -> ast.ParamDecl:
             name, ptype = _apply_declarator(cs[1], base_type, filename)
         except RuntimeError:
             ptype = _apply_abstract_declarator(cs[1], base_type, filename)
+    # C parameter type decay: T[N] → T*, T() → T(*)().
+    if isinstance(ptype, ast.ArrayType):
+        ptype = ast.PointerType(base_type=ptype.base_type)
+    elif isinstance(ptype, ast.FunctionType):
+        ptype = ast.PointerType(base_type=ptype)
     return ast.ParamDecl(
         name=name, param_type=ptype, location=_loc(node, filename)
     )
@@ -885,8 +1168,10 @@ def _apply_direct_abstract_declarator(
         # left-recursive: apply outer-level decoration to inner
         if _is_token(cs[1], "LBRACKET"):
             size: ast.Expression | None = None
-            if len(cs) == 4:
-                size = _convert_expr(cs[2], filename)
+            for child in cs[2:-1]:
+                if isinstance(child, ParseNode) and child.kind != "type_qualifier_list_opt":
+                    size = _convert_expr(child, filename)
+                    break
             inner_type = ast.ArrayType(base_type=base_type, size=size)
             return _apply_direct_abstract_declarator(cs[0], inner_type, filename)
         if _is_token(cs[1], "LPAREN"):
@@ -900,8 +1185,10 @@ def _apply_direct_abstract_declarator(
     # Leading [...] / (...) without a leading direct_abstract_declarator
     if _is_token(cs[0], "LBRACKET"):
         size: ast.Expression | None = None
-        if len(cs) == 3:
-            size = _convert_expr(cs[1], filename)
+        for child in cs[1:-1]:
+            if isinstance(child, ParseNode) and child.kind != "type_qualifier_list_opt":
+                size = _convert_expr(child, filename)
+                break
         return ast.ArrayType(base_type=base_type, size=size)
     if _is_token(cs[0], "LPAREN"):
         params, is_variadic = _convert_param_type_list_opt(
@@ -931,11 +1218,13 @@ def _convert_type_name(node: ParseNode, filename: str) -> ast.TypeNode:
 
 
 def _convert_initializer(node: ParseNode, filename: str) -> ast.Expression:
-    """initializer : assignment_expr | LBRACE initializer_list [COMMA] RBRACE"""
+    """initializer : assignment_expr | LBRACE initializer_list [COMMA] RBRACE | LBRACE RBRACE"""
     cs = node.children
     if len(cs) == 1:
         return _convert_expr(cs[0], filename)
-    # Brace-enclosed initializer list
+    # Brace-enclosed initializer list (possibly empty: `LBRACE RBRACE`).
+    if len(cs) == 2:
+        return ast.InitializerList(values=[], location=_loc(node, filename))
     items_node = cs[1]
     values: list = []
     for di in _flatten_list(items_node, "initializer_list", "designated_initializer"):
@@ -964,6 +1253,13 @@ def _convert_designation(node: ParseNode, filename: str) -> list:
         cs = d.children
         if _is_token(cs[0], "DOT"):
             out.append(_tok_text(cs[1]))
+        elif len(cs) == 5:
+            # LBRACKET expr ELLIPSIS expr RBRACKET — GCC range designator.
+            out.append(ast.RangeDesignator(
+                start=_convert_expr(cs[1], filename),
+                end=_convert_expr(cs[3], filename),
+                location=_loc(d, filename),
+            ))
         else:  # LBRACKET expr RBRACKET
             out.append(_convert_expr(cs[1], filename))
     return out
@@ -1317,7 +1613,14 @@ def _convert_primary_expr(node: ParseNode, filename: str) -> ast.Expression:
         if head_kind == "KW_NULLPTR":
             return ast.NullptrLiteral(location=_loc(node, filename))
     if _is_token(cs[0], "LPAREN") and _is_token(cs[-1], "RPAREN"):
-        return _convert_expr(cs[1], filename)
+        inner = cs[1]
+        if isinstance(inner, ParseNode) and inner.kind == "compound_stmt":
+            # GCC statement expression: ``({ ... })``. The legacy parser
+            # represents it as a synthetic node holding the compound
+            # statement; uc_core's AST has a StatementExpr type for it.
+            body = _convert_compound_stmt(inner, filename)
+            return ast.StmtExpr(body=body, location=_loc(node, filename))
+        return _convert_expr(inner, filename)
     if _is_token(cs[0], "KW_GENERIC"):
         # KW_GENERIC LPAREN assignment_expr COMMA generic_assoc_list RPAREN
         controlling = _convert_expr(cs[2], filename)
