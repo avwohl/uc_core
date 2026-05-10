@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uc_core"
-version = "0.3.5"
+version = "0.3.6"
 description = "Shared C23 frontend and AST optimizer for the uc80/uc386 family of retro C compilers"
 readme = "README.md"
 license = "GPL-3.0-or-later"

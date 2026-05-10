@@ -78,6 +78,7 @@ def parse(
     to a syntax error in declarator position.
     """
     _vector_names.clear()
+    _packed_struct_names.clear()
     # AST flatten/visit walks recurse linearly over left-recursive lists
     # (declaration_list, statement_list, ...). Default Python limit
     # (1000) overflows on ~600-item TUs (post-preprocessing for any
@@ -85,6 +86,9 @@ def parse(
     # caller hasn't set something higher already.
     if sys.getrecursionlimit() < 50_000:
         sys.setrecursionlimit(50_000)
+    # Observe packed-struct names BEFORE _strip_attributes erases the
+    # attribute itself — we need the surrounding struct shape visible.
+    _record_packed_structs(source)
     pre = _strip_attributes(source)
     scanner, table = _load_c23()
 
@@ -530,6 +534,39 @@ def _rewrite_vector_size(source: str) -> str:
     return _VECTOR_SIZE_RE.sub(repl, source)
 
 
+# Detect `__attribute__((packed))` applied to a struct definition and
+# remember the struct name(s) so the AST converter can flip
+# ``is_packed=True`` on them. Two common shapes after preprocessing
+# (the one used by lwIP via PACK_STRUCT_STRUCT, and the typedef
+# variant):
+#
+#   struct foo { ... } __attribute__((packed)) ;
+#   typedef struct { ... } __attribute__((packed)) foo_t ;
+#
+# The regex uses a non-greedy body match `\{[^{}]*\}` which doesn't
+# handle nested braces. lwIP's packed structs are flat so this is
+# enough; we can extend later if a real-world packed struct nests.
+_PACKED_NAMED_STRUCT_RE = re.compile(
+    r"\bstruct\s+([A-Za-z_]\w*)\s*\{[^{}]*\}\s*"
+    r"__attribute__\s*\(\s*\(\s*(?:__)?packed(?:__)?\s*\)\s*\)"
+)
+_PACKED_TYPEDEF_STRUCT_RE = re.compile(
+    r"\btypedef\s+struct\s*(?:[A-Za-z_]\w*\s*)?\{[^{}]*\}\s*"
+    r"__attribute__\s*\(\s*\(\s*(?:__)?packed(?:__)?\s*\)\s*\)\s*"
+    r"([A-Za-z_]\w*)"
+)
+
+
+def _record_packed_structs(source: str) -> None:
+    """Find `__attribute__((packed))` on struct decls and record the
+    affected names. Doesn't modify source — that's left to the regular
+    `__attribute__` strip path below; this just observes."""
+    for m in _PACKED_NAMED_STRUCT_RE.finditer(source):
+        _packed_struct_names.add(m.group(1))
+    for m in _PACKED_TYPEDEF_STRUCT_RE.finditer(source):
+        _packed_struct_names.add(m.group(1))
+
+
 def _strip_dos_paren_qualifiers(source: str) -> str:
     """Erase ``__based(seg)`` / ``__Seg16(...)`` style qualifiers,
     keyword and argument list together. The argument list nests
@@ -646,6 +683,13 @@ def _flatten_alt_list(node: ParseNode, list_kind: str) -> list:
 # without external locking.
 _typedefs: dict[str, ast.TypeNode] = {}
 _vector_names: set[str] = set()
+# Names recorded by `_record_packed_structs` whose source-text struct
+# decl carried `__attribute__((packed))`. The attribute is stripped
+# before the LR parse runs, so we restore the layout flag onto the
+# resulting StructDecl / typedef'd StructType after AST construction.
+# Holds tag names for `struct foo { ... } __attribute__((packed));`
+# and typedef names for `typedef struct { ... } __attribute__((packed)) foo_t;`.
+_packed_struct_names: set[str] = set()
 
 
 def _convert_translation_unit(root: ParseNode, filename: str) -> ast.TranslationUnit:
@@ -659,7 +703,42 @@ def _convert_translation_unit(root: ParseNode, filename: str) -> ast.Translation
             decls.append(d)
     if _vector_names:
         _mark_vector_arraytypes(decls)
+    if _packed_struct_names:
+        _mark_packed_structs(decls)
     return ast.TranslationUnit(declarations=decls, location=_loc(root, filename))
+
+
+def _mark_packed_structs(decls: list[ast.Declaration]) -> None:
+    """Restore ``is_packed=True`` on StructDecls / typedef'd StructTypes
+    whose source-text decl carried ``__attribute__((packed))``.
+
+    The attribute is stripped before the LR parse runs (the C grammar
+    has no production for it), so the AST loses the flag. We pre-recorded
+    the names in ``_record_packed_structs``; here we re-attach.
+
+    Two shapes to handle:
+
+    * ``struct foo { ... } __attribute__((packed));`` — recorded by tag
+      name. Mark the matching ``StructDecl``.
+    * ``typedef struct { ... } __attribute__((packed)) foo_t;`` —
+      recorded by typedef name. Mark the ``TypedefDecl.target_type``
+      ``StructType`` (the underlying anonymous shape).
+
+    The named-typedef variant (``typedef struct foo {...} __packed foo_t``)
+    matches both regexes, so both records exist and both nodes get marked.
+    """
+    def _walk(items: list) -> None:
+        for d in items:
+            if isinstance(d, ast.DeclarationList):
+                _walk(d.declarations)
+                continue
+            if isinstance(d, ast.StructDecl) and d.name in _packed_struct_names:
+                d.is_packed = True
+            if isinstance(d, ast.TypedefDecl) and d.name in _packed_struct_names:
+                tt = getattr(d, "target_type", None)
+                if isinstance(tt, ast.StructType):
+                    tt.is_packed = True
+    _walk(decls)
 
 
 def _mark_vector_arraytypes(decls: list[ast.Declaration]) -> None:
