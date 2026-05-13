@@ -74,3 +74,8 @@ Expression = _Removed
 Statement = _Removed
 StructMember_legacy = _Removed
 EnumValue_legacy = _Removed
+# C23 ``true`` / ``false`` aren't separate tokens in c23.uplox (they
+# lex as IDENT and bind to host-defined macros / nullary builtins);
+# legacy code that probed for ``ast.BoolLiteral`` always fires False
+# under the auto-AST.
+BoolLiteral = _Removed
