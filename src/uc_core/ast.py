@@ -79,3 +79,15 @@ EnumValue_legacy = _Removed
 # legacy code that probed for ``ast.BoolLiteral`` always fires False
 # under the auto-AST.
 BoolLiteral = _Removed
+
+
+# CallNoArgs always has zero arguments, so consumers that walk
+# call.args uniformly still want an empty sequence. Attach the
+# default at class level so legacy consumers reading expr.args
+# work for both Call and CallNoArgs without per-site changes.
+from .c23_parser import CallNoArgs as _CallNoArgs
+_CallNoArgs.args = ()
+# Same for FnDeclaratorEmpty — its .params field is "missing" but
+# a default empty list lets callers iterate uniformly.
+from .c23_parser import FnDeclaratorEmpty as _FnDeclaratorEmpty
+_FnDeclaratorEmpty.params = ()
