@@ -11,6 +11,7 @@ from uc_core.type_config import TypeConfig, Z80_CPM, WATCOM_FLAT32
 from uc_core.frontend import parse
 from uc_core.preprocessor import Preprocessor
 from uc_core.ast_optimizer import ASTOptimizer
+from uc_core._const import int_value
 from uc_core import ast
 
 
@@ -71,9 +72,14 @@ def _compile_and_fold(src: str, tc: TypeConfig) -> ast.TranslationUnit:
 
 
 def _first_initializer_value(unit: ast.TranslationUnit):
-    for decl in unit.declarations:
-        if isinstance(decl, ast.VarDecl) and decl.init is not None:
-            return decl.init
+    """Walk the new declarator-shape AST for the first init-declarator's
+    initializer expression."""
+    for decl in unit.items or []:
+        if not isinstance(decl, ast.Declaration):
+            continue
+        for init_decl in decl.declarators or []:
+            if isinstance(init_decl, ast.InitDeclaratorWithInit):
+                return init_decl.init
     return None
 
 
@@ -81,27 +87,27 @@ def test_sizeof_int_folds_to_config_width_z80():
     unit = _compile_and_fold("int a = sizeof(int);\n", Z80_CPM)
     init = _first_initializer_value(unit)
     assert isinstance(init, ast.IntLiteral)
-    assert init.value == 2
+    assert int_value(init) == 2
 
 
 def test_sizeof_int_folds_to_config_width_flat32():
     unit = _compile_and_fold("int a = sizeof(int);\n", WATCOM_FLAT32)
     init = _first_initializer_value(unit)
     assert isinstance(init, ast.IntLiteral)
-    assert init.value == 4
+    assert int_value(init) == 4
 
 
 def test_sizeof_long_long_folds_to_eight():
     unit = _compile_and_fold("int a = sizeof(long long);\n", Z80_CPM)
     init = _first_initializer_value(unit)
-    assert init.value == 8
+    assert int_value(init) == 8
 
 
 def test_sizeof_pointer_follows_config():
     unit = _compile_and_fold("int a = sizeof(int *);\n", WATCOM_FLAT32)
-    assert _first_initializer_value(unit).value == 4
+    assert int_value(_first_initializer_value(unit)) == 4
     unit = _compile_and_fold("int a = sizeof(int *);\n", Z80_CPM)
-    assert _first_initializer_value(unit).value == 2
+    assert int_value(_first_initializer_value(unit)) == 2
 
 
 def test_predefined_sizeof_macro_visible_to_source():
@@ -113,16 +119,16 @@ def test_predefined_sizeof_macro_visible_to_source():
     #endif
     """
     unit = _compile_and_fold(src, WATCOM_FLAT32)
-    assert _first_initializer_value(unit).value == 1
+    assert int_value(_first_initializer_value(unit)) == 1
     unit = _compile_and_fold(src, Z80_CPM)
-    assert _first_initializer_value(unit).value == 0
+    assert int_value(_first_initializer_value(unit)) == 0
 
 
 def test_literal_mask_uses_config_width():
     """0x8000 is unsigned-int on 16-bit (exceeds INT_MAX=32767) but plain int
     on 32-bit. Verify _literal_mask picks the right width per config."""
-    from uc_core.ast import IntLiteral
-    lit = IntLiteral(value=0x8000, is_hex=True)
+    from uc_core._const import make_int_lit
+    lit = make_int_lit(0x8000, is_hex=True)
     opt16 = ASTOptimizer(3, type_config=Z80_CPM)
     opt32 = ASTOptimizer(3, type_config=WATCOM_FLAT32)
     # On 16-bit int, 0x8000 fits only as 16-bit unsigned int — mask = 0xFFFF

@@ -23,6 +23,7 @@ Level 3 (-O3) adds:
 import copy
 import dataclasses
 from . import ast
+from ._const import int_value, int_flags, make_int_lit
 from .type_config import TypeConfig, Z80_CPM
 
 
@@ -70,31 +71,33 @@ class ASTOptimizer:
         max_passes = 5
         for _ in range(max_passes):
             self._changed = False
-            for decl in tu.declarations:
-                self._optimize_decl(decl)
+            for item in tu.items or []:
+                self._optimize_decl(item)
             if not self._changed:
                 break
         return tu
 
     # === Declaration walkers ===
 
-    def _optimize_decl(self, decl: ast.Declaration) -> None:
-        if isinstance(decl, ast.FunctionDecl):
+    def _optimize_decl(self, decl) -> None:
+        if isinstance(decl, ast.FunctionDef):
             if decl.body is not None:
                 if self.opt_level >= 3:
                     self._reset_level3_state()
-                    # Track parameter types for copy propagation safety
-                    for param in decl.params:
-                        if param.name is not None:
-                            self._var_types[param.name] = param.param_type
+                    # Track parameter names from the declarator chain;
+                    # types are now declarator-shaped and we no longer
+                    # carry them as resolved types in _var_types.
+                    for name in _function_param_names(decl.declarator):
+                        self._var_types[name] = None
                     self._collect_address_taken(decl.body)
                 self._optimize_stmt(decl.body)
-        elif isinstance(decl, ast.VarDecl):
-            if decl.init is not None:
-                decl.init = self._optimize_expr(decl.init)
-        elif isinstance(decl, ast.DeclarationList):
-            for d in decl.declarations:
-                self._optimize_decl(d)
+        elif isinstance(decl, ast.Declaration):
+            # A Declaration may carry zero or many init_declarators.
+            # Each ``InitDeclaratorWithInit`` has an initializer expression
+            # we want to fold; ``InitDeclarator`` has none.
+            for init_decl in decl.declarators or []:
+                if isinstance(init_decl, ast.InitDeclaratorWithInit):
+                    init_decl.init = self._optimize_expr(init_decl.init)
 
     # === Statement walkers (with dead code elimination) ===
 
@@ -341,24 +344,24 @@ class ASTOptimizer:
             expr.expr = self._optimize_expr(expr.expr)
             return expr
         elif isinstance(expr, ast.SizeofType):
-            # Constant fold sizeof(type) at compile time
+            # Constant fold sizeof(type) at compile time.
             size = self._sizeof_type(expr.target_type)
             if size is not None:
                 self._stat("sizeof_fold")
                 self._changed = True
-                return ast.IntLiteral(value=size, location=expr.location)
+                return make_int_lit(size)
             return expr
         elif isinstance(expr, ast.SizeofExpr):
-            # sizeof(string_literal) → array length including null terminator
-            if isinstance(expr.expr, ast.StringLiteral):
-                # Wide strings have wchar_t-sized elements, not bytes.
-                # We don't track wchar_t size in TypeConfig; skip the
-                # fold so codegen can handle it via the live type_of.
-                if getattr(expr.expr, "is_wide", False):
-                    return expr
+            # sizeof(string_literal) → array length including null terminator.
+            # In the new AST a string literal in expression position is
+            # either a single ``StringLiteral`` or a list of them (for
+            # adjacent literal concat); compute the total decoded length.
+            inner = expr.operand
+            strlit_len = _string_literal_byte_length(inner)
+            if strlit_len is not None:
                 self._stat("sizeof_fold")
                 self._changed = True
-                return ast.IntLiteral(value=len(expr.expr.value) + 1, location=expr.location)
+                return make_int_lit(strlit_len + 1)
             return expr
         elif isinstance(expr, ast.InitializerList):
             expr.values = [self._optimize_expr(v) if isinstance(v, ast.Expression) else v
@@ -1753,18 +1756,19 @@ class ASTOptimizer:
         int_mask = tc.uint_max
         long_mask = tc.ulong_max
         long_long_mask = tc.ulong_long_max
-        val = lit.value
-        if getattr(lit, 'is_long_long', False):
+        val = int_value(lit)
+        is_long, is_long_long, is_unsigned, is_hex = int_flags(lit)
+        if is_long_long:
             return long_long_mask
-        if lit.is_long and lit.is_unsigned:
+        if is_long and is_unsigned:
             # LU/UL suffix: unsigned long, then unsigned long long.
             if val > tc.ulong_max or val < 0:
                 return long_long_mask
             return long_mask
-        if lit.is_long:
+        if is_long:
             # L suffix on hex/octal: long → unsigned long → long long → ulong long.
             # L suffix on decimal: long → long long.
-            if lit.is_hex:
+            if is_hex:
                 if val > tc.ulong_max or val < -(tc.long_max + 1):
                     return long_long_mask
                 if val > tc.long_max:
@@ -1773,7 +1777,7 @@ class ASTOptimizer:
             if val > tc.long_max or val < -(tc.long_max + 1):
                 return long_long_mask
             return long_mask
-        if lit.is_hex or lit.is_unsigned:
+        if is_hex or is_unsigned:
             if val > tc.uint_max or val < -(tc.int_max + 1):
                 if val > tc.ulong_max:
                     return long_long_mask
@@ -1866,13 +1870,205 @@ class ASTOptimizer:
             return val - (mask + 1)
         return val
 
-    def _sizeof_type(self, t: ast.TypeNode) -> int | None:
-        """Compute sizeof(type) at compile time. Returns None if unknown."""
-        if isinstance(t, ast.BasicType):
-            return self.type_config.sizeof_basic(t.name)
-        if isinstance(t, ast.PointerType):
+    def _sizeof_type(self, t) -> int | None:
+        """Compute sizeof(type) at compile time on the declarator-shape AST.
+
+        ``t`` is a ``TypeName`` (decl_specs only) or
+        ``TypeNameWithDeclarator`` (decl_specs + abstract declarator).
+        Returns ``None`` for shapes the optimizer can't size statically
+        (typeof, _BitInt, structs/enums by reference, arrays of unknown
+        bound, etc.) so the host's backend can compute them with full
+        type info at codegen time.
+        """
+        if isinstance(t, ast.TypeName):
+            return self._sizeof_decl_specs(t.decl_specs)
+        if isinstance(t, ast.TypeNameWithDeclarator):
+            inner = self._sizeof_decl_specs(t.decl_specs)
+            if inner is None:
+                return None
+            return self._wrap_abstract_declarator_size(t.declarator, inner)
+        return None
+
+    def _sizeof_decl_specs(self, decl_specs) -> int | None:
+        """Walk a decl_specs list and compute size of the resulting base type."""
+        type_keywords: list[str] = []
+        signed_kw: bool | None = None
+        for spec in decl_specs or []:
+            if isinstance(spec, ast.BasicTypeSpec):
+                kw = spec.kw.text
+                if kw in ("signed", "__signed", "__signed__"):
+                    signed_kw = True
+                elif kw == "unsigned":
+                    signed_kw = False
+                else:
+                    type_keywords.append(kw)
+            elif isinstance(spec, ast.TypedefNameSpec):
+                # Typedef'd name — would need a typedef table to resolve;
+                # the optimizer doesn't carry one. Skip.
+                return None
+            elif isinstance(spec, (ast.StorageClass, ast.TypeQualifier,
+                                   ast.AlignasType, ast.AlignasValue)):
+                continue
+            else:
+                # Struct/Enum/Typeof/BitInt — punt.
+                return None
+        name = self._reduce_type_keywords(type_keywords)
+        if name is None:
+            return None
+        return self.type_config.sizeof_basic(name)
+
+    @staticmethod
+    def _reduce_type_keywords(keywords: list[str]) -> str | None:
+        if not keywords:
+            return "int"  # bare ``signed`` / ``unsigned``
+        long_count = keywords.count("long")
+        keywords_no_long = [k for k in keywords if k != "long"]
+        if "void" in keywords:
+            return "void"
+        if "double" in keywords:
+            return "long double" if long_count else "double"
+        if "float" in keywords:
+            return "float"
+        if "char" in keywords:
+            return "char"
+        if "short" in keywords:
+            return "short"
+        if "bool" in keywords or "_Bool" in keywords:
+            return "bool"
+        if long_count >= 2:
+            return "long long"
+        if long_count == 1:
+            return "long"
+        if keywords_no_long:
+            return keywords_no_long[0]
+        return "int"
+
+    def _wrap_abstract_declarator_size(self, node, inner: int) -> int | None:
+        """Compute sizeof for an abstract declarator chain wrapping a base size.
+
+        Abstract pointers contribute ``ptr_size``; abstract arrays
+        multiply by the constant size (or return None if the size is
+        not a constant); abstract function declarators yield a function
+        pointer size at the C decay rule.
+        """
+        if isinstance(node, ast.AbstractPointer):
+            # outermost is a pointer chain — sizeof is one pointer per
+            # level. Count the levels in the pointer list.
             return self.type_config.ptr_size
-        return None  # Structs, arrays — too complex for optimizer
+        if isinstance(node, ast.AbstractPointerInner):
+            return self.type_config.ptr_size
+        # Arrays / fn declarators on abstract types — punt.
+        return None
 
     def _stat(self, name: str) -> None:
         self.stats[name] = self.stats.get(name, 0) + 1
+
+
+# ---- declarator-shape AST helpers ------------------------------------------
+
+
+def _function_param_names(declarator) -> list[str]:
+    """From a FunctionDef.declarator chain, yield each parameter's IDENT name.
+
+    Auto-AST shape: the outermost declarator is an ``FnDeclarator`` (or
+    ``FnDeclaratorEmpty`` for ``()`` / ``(void)``); its ``params`` field
+    is either a list of ``ParamDecl`` / ``ParamDeclAbstract`` /
+    ``ParamDeclTypeOnly`` or a ``VariadicParams`` wrapping that list.
+    """
+    fn = _outermost_fn_declarator(declarator)
+    if fn is None:
+        return []
+    if isinstance(fn, ast.FnDeclaratorEmpty):
+        return []
+    params = fn.params
+    if isinstance(params, ast.VariadicParams):
+        params = params.params
+    out: list[str] = []
+    for p in params or []:
+        if isinstance(p, ast.ParamDecl):
+            name = _declarator_ident(p.declarator)
+            if name is not None:
+                out.append(name)
+    return out
+
+
+def _outermost_fn_declarator(node):
+    """Walk through PointerDeclarator wraps to find the outermost
+    FnDeclarator / FnDeclaratorEmpty (or None if not a function)."""
+    while node is not None:
+        if isinstance(node, (ast.FnDeclarator, ast.FnDeclaratorEmpty)):
+            return node
+        if isinstance(node, ast.PointerDeclarator):
+            node = node.inner
+            continue
+        if isinstance(node, ast.GroupDeclarator):
+            node = node.inner
+            continue
+        return None
+    return None
+
+
+def _string_literal_byte_length(node) -> int | None:
+    """Compute the decoded byte length of a string-literal AST node.
+
+    Returns ``None`` for non-string operands or wide strings (we don't
+    track wchar_t size in the TypeConfig so codegen handles those).
+    """
+    # The grammar's <string_literal> non-terminal is annotated as a
+    # list of <string_piece> StringLiteral nodes — adjacent C string
+    # literals concatenate. A single piece comes through as the bare
+    # StringLiteral; multiple pieces as a list.
+    if isinstance(node, ast.StringLiteral):
+        return _decoded_string_len(node)
+    if isinstance(node, list) and all(isinstance(p, ast.StringLiteral) for p in node):
+        total = 0
+        for p in node:
+            n = _decoded_string_len(p)
+            if n is None:
+                return None
+            total += n
+        return total
+    return None
+
+
+def _decoded_string_len(lit) -> int | None:
+    """Length of a StringLiteral's decoded payload (in bytes for narrow
+    strings; ``None`` for wide / u8 / u / U / L variants we don't size)."""
+    text = lit.value.text
+    # Strip encoding prefix. u8 narrow stays bytes; u/U/L are wide.
+    if text.startswith("u8"):
+        text = text[2:]
+    elif text.startswith(("u", "U", "L")):
+        return None
+    assert text.startswith('"') and text.endswith('"'), f"bad string lit {lit.value.text!r}"
+    body = text[1:-1]
+    n = 0
+    i = 0
+    while i < len(body):
+        c = body[i]
+        if c == "\\" and i + 1 < len(body):
+            # One escape consumes (up to) two source chars and contributes
+            # one byte. \xNN / \NNN escapes consume more but we don't
+            # parse those fully here — approximate by 2 chars / 1 byte.
+            i += 2
+            n += 1
+            continue
+        i += 1
+        n += 1
+    return n
+
+
+def _declarator_ident(node) -> str | None:
+    """The innermost ``Declarator(name=IDENT)`` of a declarator chain."""
+    while node is not None:
+        if isinstance(node, ast.Declarator):
+            return node.name.text
+        for attr in ("inner",):
+            sub = getattr(node, attr, None)
+            if sub is not None:
+                node = sub
+                break
+        else:
+            return None
+    return None
+

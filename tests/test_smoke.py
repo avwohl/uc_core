@@ -19,9 +19,12 @@ def test_pipeline_end_to_end():
     preprocessed = pp.preprocess(SRC, "t.c")
     unit = parse(preprocessed, "t.c")
     unit = ASTOptimizer(3).optimize(unit)
-    funcs = [d for d in unit.declarations if isinstance(d, ast.FunctionDecl)]
+    funcs = [d for d in unit.items if isinstance(d, ast.FunctionDef)]
     assert len(funcs) == 1
-    assert funcs[0].name == "answer"
+    # FunctionDef.declarator is a FnDeclarator / FnDeclaratorEmpty; the
+    # innermost Declarator carries the IDENT name token.
+    from uc_core.ast_optimizer import _declarator_ident
+    assert _declarator_ident(funcs[0].declarator) == "answer"
 
 
 def test_target_predefines_are_caller_supplied():

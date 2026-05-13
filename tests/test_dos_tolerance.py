@@ -72,24 +72,37 @@ def test_dos_qualifiers_parse(label, src):
     unit = _parse(src)
     assert unit is not None
     # Each snippet declares exactly one top-level entity
-    assert len(unit.declarations) == 1
+    assert len(unit.items) == 1
 
 
 def test_dos_qualifiers_are_ignored_not_typedefs():
     """'far', 'near' etc. must not be treated as typedef names or identifiers
     that end up in the AST — they should be silently absorbed."""
     unit = _parse("int far x;")
-    decl = unit.declarations[0]
-    assert isinstance(decl, ast.VarDecl)
-    assert decl.name == "x"
+    decl = unit.items[0]
+    assert isinstance(decl, ast.Declaration)
+    # The single init_declarator carries the variable's name.
+    from uc_core.ast_optimizer import _declarator_ident
+    assert len(decl.declarators) == 1
+    inner = decl.declarators[0].declarator
+    assert _declarator_ident(inner) == "x"
 
 
 def test_watcall_function_parses_like_cdecl():
     """Phase 1: all calling conventions compile to the same ABI. Verify the
     AST shape matches a plain function declaration."""
-    plain = _parse("int f(int a, int b);").declarations[0]
-    watcall = _parse("int __watcall f(int a, int b);").declarations[0]
-    assert plain.name == watcall.name
-    assert isinstance(plain.var_type, ast.FunctionType)
-    assert isinstance(watcall.var_type, ast.FunctionType)
-    assert len(plain.var_type.param_types) == len(watcall.var_type.param_types)
+    from uc_core.ast_optimizer import _declarator_ident, _outermost_fn_declarator
+    plain = _parse("int f(int a, int b);").items[0]
+    watcall = _parse("int __watcall f(int a, int b);").items[0]
+    plain_decl = plain.declarators[0].declarator
+    watcall_decl = watcall.declarators[0].declarator
+    assert _declarator_ident(plain_decl) == _declarator_ident(watcall_decl) == "f"
+    plain_fn = _outermost_fn_declarator(plain_decl)
+    watcall_fn = _outermost_fn_declarator(watcall_decl)
+    assert plain_fn is not None and watcall_fn is not None
+    assert isinstance(plain_fn, ast.FnDeclarator)
+    assert isinstance(watcall_fn, ast.FnDeclarator)
+    # Same parameter count.
+    plain_params = plain_fn.params.params if isinstance(plain_fn.params, ast.VariadicParams) else plain_fn.params
+    watcall_params = watcall_fn.params.params if isinstance(watcall_fn.params, ast.VariadicParams) else watcall_fn.params
+    assert len(plain_params) == len(watcall_params)

@@ -43,8 +43,10 @@ def test_pragma_drops_silently(label, pragma):
     out = pp.preprocess(src, "t.c")
     # Parser must see only the real declaration
     unit = parse(out, "t.c")
-    assert len(unit.declarations) == 1
-    assert unit.declarations[0].name == "x"
+    assert len(unit.items) == 1
+    from uc_core.ast_optimizer import _declarator_ident
+    decl = unit.items[0]
+    assert _declarator_ident(decl.declarators[0].declarator) == "x"
 
 
 def test_pragma_pack_still_honored():
@@ -54,7 +56,7 @@ def test_pragma_pack_still_honored():
     out = pp.preprocess(src, "t.c")
     # It shouldn't error, and the declaration should still parse
     unit = parse(out, "t.c")
-    assert len(unit.declarations) == 1
+    assert len(unit.items) == 1
 
 
 def test_pragma_printf_still_honored():
