@@ -272,6 +272,20 @@ _UnaryOp.is_prefix = True
 _PostfixOp.is_prefix = False
 
 
+# Field aliases for legacy codegen sites:
+#   GotoStmt.target  -> Token text of .label
+#   StmtExpr.body    -> .stmt (the inner CompoundStmt)
+#   VaArgExpr.ap     -> .va_list_expr
+# The legacy AST exposed these as flat attrs; the auto-AST renamed them.
+# Defining them as @property keeps the legacy callsites working.
+from .c23_parser import (
+    GotoStmt as _GotoStmt, StmtExpr as _StmtExpr, VaArgExpr as _VaArgExpr,
+)
+_GotoStmt.target = property(lambda self: self.label.text)
+_StmtExpr.body = property(lambda self: self.stmt)
+_VaArgExpr.ap = property(lambda self: self.va_list_expr)
+
+
 # Auto-AST Cast / SizeofType / AlignofType / CompoundLiteral /
 # CompoundLiteralEmpty carry ``target_type`` as an ``ast.TypeName`` /
 # ``ast.TypeNameWithDeclarator`` wrapper. Legacy codegens read
