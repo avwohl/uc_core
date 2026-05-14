@@ -270,3 +270,51 @@ from .c23_parser import UnaryOp as _UnaryOp
 from .c23_parser import PostfixOp as _PostfixOp
 _UnaryOp.is_prefix = True
 _PostfixOp.is_prefix = False
+
+
+# Auto-AST Cast / SizeofType / AlignofType / CompoundLiteral /
+# CompoundLiteralEmpty carry ``target_type`` as an ``ast.TypeName`` /
+# ``ast.TypeNameWithDeclarator`` wrapper. Legacy codegens read
+# ``target_type`` and isinstance-check it against
+# ``ast_legacy.{BasicType,PointerType,...}`` — convert at construction
+# so consumers see the legacy shape directly.
+def _convert_target_type(t):
+    from .c23_parser import TypeName as _TN, TypeNameWithDeclarator as _TNWD
+    from .codegen_helpers import (
+        resolve_base_type as _rbt,
+        resolve_type_from_decl as _rtfd,
+    )
+    if t is None:
+        return None
+    if isinstance(t, _TN):
+        return resolved_to_legacy(_rbt(t.decl_specs))
+    if isinstance(t, _TNWD):
+        _, rt = _rtfd(t.decl_specs, t.declarator)
+        return resolved_to_legacy(rt)
+    return resolved_to_legacy(t)
+
+
+def _wrap_init_convert_target(cls):
+    """Wrap ``cls.__init__`` to convert ``self.target_type`` to legacy
+    shape after construction. Done via __init__ wrap (not __post_init__)
+    because dataclass-generated __init__ only calls __post_init__ when
+    the method was present at @dataclass decoration time."""
+    orig_init = cls.__init__
+
+    def __init__(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        self.target_type = _convert_target_type(self.target_type)
+    cls.__init__ = __init__
+
+
+from .c23_parser import (
+    Cast as _Cast,
+    CompoundLiteral as _CompoundLiteral,
+    CompoundLiteralEmpty as _CompoundLiteralEmpty,
+)
+# SizeofType / AlignofType target_type is NOT converted at construction
+# because the ast_optimizer's `_sizeof_type` reads it back as a
+# ``ast.TypeName`` / ``ast.TypeNameWithDeclarator`` for compile-time
+# folding. Codegens convert on demand via ``_to_legacy_type``.
+for _c in (_Cast, _CompoundLiteral, _CompoundLiteralEmpty):
+    _wrap_init_convert_target(_c)

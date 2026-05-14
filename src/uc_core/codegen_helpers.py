@@ -56,6 +56,34 @@ class ResolvedType:
     members: tuple = ()
 
 
+_active_typedef_resolver = None
+
+
+class typedef_resolver_scope:
+    """Context manager installing a callable resolver(name) -> Optional[ResolvedType].
+
+    While active, :func:`resolve_base_type` calls the resolver when it
+    sees a ``TypedefNameSpec``; if the resolver returns a non-None
+    :class:`ResolvedType`, that shape is substituted for the typedef-
+    name. Hosts use this to expand typedef-named types into their
+    underlying struct / pointer / basic shape so the downstream codegen
+    never needs to track a typedef table itself.
+    """
+    def __init__(self, resolver):
+        self.resolver = resolver
+        self._prev = None
+
+    def __enter__(self):
+        global _active_typedef_resolver
+        self._prev = _active_typedef_resolver
+        _active_typedef_resolver = self.resolver
+        return self
+
+    def __exit__(self, *_):
+        global _active_typedef_resolver
+        _active_typedef_resolver = self._prev
+
+
 def resolve_type_from_decl(decl_specs, declarator) -> tuple[Optional[str], ResolvedType]:
     base = resolve_base_type(decl_specs)
     return _wrap_declarator(declarator, base)
@@ -88,7 +116,17 @@ def resolve_base_type(decl_specs) -> ResolvedType:
         elif isinstance(spec, ast.StorageClass):
             continue
         elif isinstance(spec, ast.TypedefNameSpec):
-            explicit = ResolvedType(kind="typedef", name=spec.name.text)
+            # If a host has installed a typedef resolver, look up the
+            # underlying type so the rest of the codegen sees the
+            # resolved shape (BasicType / StructType / PointerType / ...).
+            # Otherwise emit the unresolved "typedef" sentinel for the
+            # caller to handle.
+            resolver = _active_typedef_resolver
+            resolved = resolver(spec.name.text) if resolver is not None else None
+            if resolved is not None:
+                explicit = resolved
+            else:
+                explicit = ResolvedType(kind="typedef", name=spec.name.text)
         elif isinstance(spec, (ast.StructDef, ast.StructAnon, ast.StructEmpty,
                                ast.StructAnonEmpty, ast.StructRef)):
             explicit = _resolve_struct_spec(spec)
@@ -132,7 +170,12 @@ def _reduce_type_keywords(keywords: list[str]) -> str:
     if long_count == 1:
         return "long"
     if others:
-        return others[0]
+        kw = others[0]
+        # Normalise GCC's leading-underscore aliases to the bare name
+        # codegens expect (matches the legacy resolved-type tree).
+        if kw == "__int128":
+            return "int128"
+        return kw
     return "int"
 
 
