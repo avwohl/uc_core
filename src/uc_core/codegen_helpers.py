@@ -241,6 +241,65 @@ def _wrap_declarator(node, base: ResolvedType) -> tuple[Optional[str], ResolvedT
         fn = ResolvedType(kind="function", return_type=base, param_types=(),
                           is_variadic=False)
         return _wrap_declarator(node.inner, fn)
+    # Abstract declarators (used in type-names like `int (*)[3]` or
+    # `int[]`). Same shape as the named variants but without an
+    # innermost ``Declarator(name)``.
+    if isinstance(node, ast.AbstractPointer):
+        wrapped = _wrap_pointer(node.pointer, base)
+        return None, wrapped
+    if isinstance(node, ast.AbstractPointerInner):
+        wrapped = _wrap_pointer(node.pointer, base)
+        return _wrap_declarator(node.inner, wrapped)
+    if isinstance(node, ast.AbstractGroup):
+        return _wrap_declarator(node.inner, base)
+    if isinstance(node, ast.AbstractArray):
+        inner_name, inner_type = _wrap_declarator(
+            node.inner,
+            ResolvedType(kind="array", element=base, size_expr=node.size),
+        )
+        return inner_name, inner_type
+    if isinstance(node, ast.AbstractArrayBare):
+        return None, ResolvedType(
+            kind="array", element=base, size_expr=node.size,
+        )
+    if isinstance(node, (ast.AbstractArrayUnsized, ast.AbstractArrayStar)):
+        inner_name, inner_type = _wrap_declarator(
+            node.inner,
+            ResolvedType(kind="array", element=base, size_expr=None),
+        )
+        return inner_name, inner_type
+    if isinstance(node, (ast.AbstractArrayStatic, ast.AbstractArrayQualStatic)):
+        inner_name, inner_type = _wrap_declarator(
+            node.inner,
+            ResolvedType(kind="array", element=base, size_expr=node.size),
+        )
+        return inner_name, inner_type
+    if isinstance(node, ast.AbstractFnEmpty):
+        fn = ResolvedType(kind="function", return_type=base, param_types=(),
+                          is_variadic=False)
+        return _wrap_declarator(node.inner, fn)
+    if isinstance(node, ast.AbstractFn):
+        params = node.params
+        is_variadic = isinstance(params, ast.VariadicParams)
+        if is_variadic:
+            params = params.params
+        param_types: list[ResolvedType] = []
+        for p in params or []:
+            if isinstance(p, ast.ParamDecl):
+                _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
+                param_types.append(pt)
+            elif isinstance(p, ast.ParamDeclAbstract):
+                _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
+                param_types.append(pt)
+            elif isinstance(p, ast.ParamDeclTypeOnly):
+                param_types.append(resolve_base_type(p.decl_specs))
+        if (len(param_types) == 1 and param_types[0].kind == "basic"
+                and param_types[0].name == "void"):
+            param_types = []
+        fn = ResolvedType(kind="function", return_type=base,
+                          param_types=tuple(param_types),
+                          is_variadic=is_variadic)
+        return _wrap_declarator(node.inner, fn)
     if isinstance(node, ast.FnDeclarator):
         params = node.params
         is_variadic = isinstance(params, ast.VariadicParams)
