@@ -124,8 +124,13 @@ def _fd_is_variadic(self):
 def _fd_params(self):
     """Yield ParamDecl-shaped namespaces for each named parameter,
     matching the legacy ``FunctionDecl.params`` (list of ParamDecl
-    with .name / .param_type / .size_side_effects)."""
-    from .codegen_helpers import function_params, declarator_ident, resolve_type_from_decl
+    with .name / .param_type / .size_side_effects).
+    ``param_type`` is in legacy ``ast_legacy`` form so existing
+    isinstance checks against BasicType / PointerType / etc. work."""
+    from .codegen_helpers import (
+        function_params, declarator_ident, resolve_type_from_decl,
+        resolve_base_type,
+    )
 
     class _ParamView:
         __slots__ = ("name", "param_type", "size_side_effects")
@@ -136,26 +141,84 @@ def _fd_params(self):
             self.size_side_effects = None
 
     out = []
+    from . import c23_parser as _cp
     for p in function_params(self):
-        if isinstance(p, _CallNoArgs.__class__):  # never matches; placeholder
-            continue
-        from . import c23_parser as _cp
         if isinstance(p, _cp.ParamDecl):
             _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
-            out.append(_ParamView(declarator_ident(p.declarator), pt))
+            out.append(_ParamView(declarator_ident(p.declarator),
+                                  resolved_to_legacy(pt)))
         elif isinstance(p, _cp.ParamDeclAbstract):
             _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
-            out.append(_ParamView(None, pt))
+            out.append(_ParamView(None, resolved_to_legacy(pt)))
         elif isinstance(p, _cp.ParamDeclTypeOnly):
-            from .codegen_helpers import resolve_base_type
-            out.append(_ParamView(None, resolve_base_type(p.decl_specs)))
+            pt = resolve_base_type(p.decl_specs)
+            out.append(_ParamView(None, resolved_to_legacy(pt)))
     return out
 
 
 def _fd_return_type(self):
     from .codegen_helpers import resolve_type_from_decl
     _, fn_type = resolve_type_from_decl(self.decl_specs, self.declarator)
-    return fn_type.return_type if fn_type.kind == "function" else fn_type
+    inner = fn_type.return_type if fn_type.kind == "function" else fn_type
+    return resolved_to_legacy(inner)
+
+
+def resolved_to_legacy(rt):
+    """Convert a ``ResolvedType`` to the equivalent ``ast_legacy`` tree
+    (BasicType / PointerType / ArrayType / FunctionType / StructType /
+    EnumType). Codegens that walk legacy types unchanged see them in
+    the shape they expect."""
+    from .codegen_helpers import ResolvedType as _RT
+    from . import ast_legacy as _lt
+    if rt is None:
+        return None
+    if not isinstance(rt, _RT):
+        return rt  # already a legacy type or some other thing
+    if rt.kind == "basic":
+        return _lt.BasicType(
+            name=rt.name or "int",
+            is_signed=rt.is_signed,
+            is_const=rt.is_const,
+            is_volatile=rt.is_volatile,
+        )
+    if rt.kind == "pointer":
+        return _lt.PointerType(
+            base_type=resolved_to_legacy(rt.pointee),
+            is_const=rt.is_const,
+            is_volatile=rt.is_volatile,
+        )
+    if rt.kind == "array":
+        return _lt.ArrayType(
+            base_type=resolved_to_legacy(rt.element),
+            size=rt.size_expr,
+        )
+    if rt.kind == "function":
+        return _lt.FunctionType(
+            return_type=resolved_to_legacy(rt.return_type),
+            param_types=[resolved_to_legacy(p) for p in rt.param_types],
+            is_variadic=rt.is_variadic,
+        )
+    if rt.kind == "struct":
+        members = [
+            _lt.StructMember(
+                name=nm,
+                member_type=resolved_to_legacy(mt),
+                bit_width=bw,
+            )
+            for (nm, mt, bw) in rt.members
+        ]
+        return _lt.StructType(
+            name=rt.name,
+            is_union=rt.is_union,
+            members=members,
+        )
+    if rt.kind == "enum":
+        return _lt.EnumType(name=rt.name)
+    if rt.kind == "typedef":
+        # Unresolved typedef-name reference. uc_core has no typedef
+        # table at this level; fall back to int.
+        return _lt.BasicType(name=rt.name or "int")
+    return None
 
 
 _FunctionDef.name = property(_fd_name)
