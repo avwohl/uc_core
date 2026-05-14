@@ -182,25 +182,39 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     ``KW_TYPEDEF`` tokens in a CST.
     """
     names: set[str] = set(seed_typedefs or ())
-    # Track the previous token name so we can suppress the IDENT->
-    # TYPEDEF_NAME rewrite when the IDENT is immediately preceded by
-    # ``struct`` / ``union`` / ``enum`` (those introduce a tag
-    # namespace separate from the typedef namespace; a tag and a
-    # typedef can share a name, e.g. ``typedef struct Regexp Regexp;``).
-    # Also suppress after ``.`` or ``->`` since member references live
-    # in their own namespace too.
-    last_name: list[str] = [""]
+    # Track the previous token name (keyed by source offset so the
+    # parser's re-querying the same token doesn't advance the state).
+    # Suppress the IDENT -> TYPEDEF_NAME rewrite when the IDENT is
+    # immediately preceded by ``struct`` / ``union`` / ``enum`` (those
+    # introduce a tag namespace separate from the typedef namespace;
+    # a tag and a typedef can share a name, e.g.
+    # ``typedef struct Regexp Regexp;``). Also suppress after ``.`` or
+    # ``->`` since member references live in their own namespace too.
     _SUPPRESS_PREV = frozenset({
         "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
     })
+    # state[0] = offset of the currently-being-filtered token
+    # state[1] = name of the previously-distinct token (used as `prev`
+    #            for the suppress check)
+    # state[2] = name of the currently-being-filtered token
+    # The parser may re-query the same offset multiple times during
+    # lookahead; only advance state when the offset changes so the
+    # `prev` context stays stable for a given token.
+    state = [-1, "", ""]
 
     def filter_(_ctx, tok: Token) -> Token:
-        prev = last_name[0]
-        last_name[0] = tok.name
+        offset = getattr(tok, "offset", -1)
+        if offset != state[0]:
+            # New token: previous distinct name becomes what this
+            # token's current name was (i.e. the token before this one).
+            state[1] = state[2]
+            state[2] = tok.name
+            state[0] = offset
+        prev_name = state[1]
         if (
             tok.name == "IDENT"
             and tok.text in names
-            and prev not in _SUPPRESS_PREV
+            and prev_name not in _SUPPRESS_PREV
         ):
             return Token(
                 name="TYPEDEF_NAME",
