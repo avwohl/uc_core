@@ -182,9 +182,26 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     ``KW_TYPEDEF`` tokens in a CST.
     """
     names: set[str] = set(seed_typedefs or ())
+    # Track the previous token name so we can suppress the IDENT->
+    # TYPEDEF_NAME rewrite when the IDENT is immediately preceded by
+    # ``struct`` / ``union`` / ``enum`` (those introduce a tag
+    # namespace separate from the typedef namespace; a tag and a
+    # typedef can share a name, e.g. ``typedef struct Regexp Regexp;``).
+    # Also suppress after ``.`` or ``->`` since member references live
+    # in their own namespace too.
+    last_name: list[str] = [""]
+    _SUPPRESS_PREV = frozenset({
+        "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
+    })
 
     def filter_(_ctx, tok: Token) -> Token:
-        if tok.name == "IDENT" and tok.text in names:
+        prev = last_name[0]
+        last_name[0] = tok.name
+        if (
+            tok.name == "IDENT"
+            and tok.text in names
+            and prev not in _SUPPRESS_PREV
+        ):
             return Token(
                 name="TYPEDEF_NAME",
                 text=tok.text,
