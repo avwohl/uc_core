@@ -214,6 +214,12 @@ def resolved_to_legacy(rt):
         )
     if rt.kind == "enum":
         return _lt.EnumType(name=rt.name)
+    if rt.kind == "complex":
+        return _lt.ComplexType(
+            base_type=rt.name or "double",
+            is_const=rt.is_const,
+            is_volatile=rt.is_volatile,
+        )
     if rt.kind == "typedef":
         # Unresolved typedef-name reference. uc_core has no typedef
         # table at this level; fall back to int.

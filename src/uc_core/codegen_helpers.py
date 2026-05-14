@@ -66,6 +66,7 @@ def resolve_base_type(decl_specs) -> ResolvedType:
     signed: Optional[bool] = None
     is_const = False
     is_volatile = False
+    is_complex = False
     explicit: Optional[ResolvedType] = None
     for spec in decl_specs or []:
         if isinstance(spec, ast.BasicTypeSpec):
@@ -74,6 +75,8 @@ def resolve_base_type(decl_specs) -> ResolvedType:
                 signed = True
             elif kw == "unsigned":
                 signed = False
+            elif kw in ("_Complex", "__complex", "__complex__"):
+                is_complex = True
             else:
                 type_keywords.append(kw)
         elif isinstance(spec, ast.TypeQualifier):
@@ -98,6 +101,12 @@ def resolve_base_type(decl_specs) -> ResolvedType:
         explicit = ResolvedType(kind="basic", name=name, is_signed=signed)
     explicit.is_const = explicit.is_const or is_const
     explicit.is_volatile = explicit.is_volatile or is_volatile
+    if is_complex and explicit.kind == "basic":
+        # _Complex T is laid out as two T's; codegen treats it as a
+        # struct-like with .base_type giving the element type name.
+        # We store the complex spec inline so resolved_to_legacy can
+        # produce a proper ComplexType. The base name lives in `name`.
+        explicit.kind = "complex"
     return explicit
 
 
