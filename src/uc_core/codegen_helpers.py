@@ -175,6 +175,12 @@ def _reduce_type_keywords(keywords: list[str]) -> str:
         # codegens expect (matches the legacy resolved-type tree).
         if kw == "__int128":
             return "int128"
+        # C23 _Decimal32 / _Decimal64 / _Decimal128 are decimal floats;
+        # codegens approximate them as the same-precision binary float.
+        if kw == "_Decimal32":
+            return "float"
+        if kw in ("_Decimal64", "_Decimal128"):
+            return "double"
         return kw
     return "int"
 

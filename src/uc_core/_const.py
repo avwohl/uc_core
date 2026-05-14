@@ -66,9 +66,11 @@ def float_value(lit) -> float:
         )
     text = lit.value.text
     # Strip suffix: f / F / l / L / i / I / j / J (and combinations like
-    # `fi` for `float imaginary`).
+    # `fi` for `float imaginary`). Also strip C23 decimal-float
+    # suffixes: df / DF, dd / DD, dl / DL (_Decimal32 / _Decimal64 /
+    # _Decimal128).
     n = len(text)
-    while n > 0 and text[n - 1] in "fFlLiIjJ":
+    while n > 0 and text[n - 1] in "fFlLiIjJdD":
         n -= 1
     text = text[:n]
     text = text.replace("'", "")  # C23 digit separator
