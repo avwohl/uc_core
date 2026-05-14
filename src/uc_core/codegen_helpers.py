@@ -268,6 +268,14 @@ def _wrap_declarator(node, base: ResolvedType) -> tuple[Optional[str], ResolvedT
         return None, ResolvedType(
             kind="array", element=base, size_expr=node.size,
         )
+    if isinstance(node, (ast.AbstractArrayBareUnsized, ast.AbstractArrayBareStar)):
+        return None, ResolvedType(
+            kind="array", element=base, size_expr=None,
+        )
+    if isinstance(node, (ast.AbstractArrayBareStatic, ast.AbstractArrayBareQualStatic)):
+        return None, ResolvedType(
+            kind="array", element=base, size_expr=node.size,
+        )
     if isinstance(node, (ast.AbstractArrayUnsized, ast.AbstractArrayStar)):
         inner_name, inner_type = _wrap_declarator(
             node.inner,
