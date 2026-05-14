@@ -72,12 +72,59 @@ _DOS_PAREN_QUALIFIER_RE = re.compile(
 )
 
 
+_BUILTIN_ELEM_SIZES = {
+    "char": 1, "signed char": 1, "unsigned char": 1,
+    "short": 2, "unsigned short": 2, "signed short": 2,
+    "int": 4, "unsigned int": 4, "signed int": 4, "unsigned": 4, "signed": 4,
+    "long": 4, "unsigned long": 4, "signed long": 4,
+    "long long": 8, "unsigned long long": 8, "signed long long": 8,
+    "float": 4, "double": 8, "long double": 8,
+}
+
+_VECTOR_SIZE_RE = re.compile(
+    r"\b((?:typedef\s+)?"
+    r"(?:(?:unsigned|signed)\s+)?"
+    r"(?:char|short|int|long(?:\s+long)?|float|double))"
+    r"\s+([A-Za-z_]\w*)"
+    r"\s*__attribute__\s*\(\s*\(\s*(?:__)?vector_size(?:__)?"
+    r"\s*\(\s*(\d+)\s*\)\s*\)\s*\)"
+)
+
+
+def _rewrite_vector_size(source: str) -> str:
+    """Rewrite ``T name __attribute__((vector_size(N)))`` into
+    ``T name[N/sizeof(T)]`` so the resulting array shape is preserved
+    after attribute stripping. uc386 codegen reads the array storage
+    layout from the resulting ArrayType; the GCC-specific
+    ``is_vector`` flag isn't reproduced here, but the byte layout is
+    identical."""
+    def repl(m: re.Match) -> str:
+        type_part = m.group(1)
+        name = m.group(2)
+        n_bytes = int(m.group(3))
+        elem_type = type_part
+        if elem_type.startswith("typedef "):
+            elem_type = elem_type[len("typedef ") :]
+        elem_type = " ".join(elem_type.split())
+        elem_size = _BUILTIN_ELEM_SIZES.get(elem_type, 4)
+        count = n_bytes // elem_size if elem_size else 0
+        if count <= 0:
+            return f"{type_part} {name}"
+        return f"{type_part} {name}[{count}]"
+
+    return _VECTOR_SIZE_RE.sub(repl, source)
+
+
 def _strip_attributes(source: str) -> str:
     """Strip GCC ``__attribute__`` and C23 ``[[...]]`` attributes, plus
     period DOS-era qualifier keywords (near/far/huge/__cdecl/__pascal/
     etc.). None of these are modelled by the c23 grammar; we erase
     them at the source level so the uplox parser sees clean C23.
+
+    ``__attribute__((vector_size(N)))`` is rewritten first into an
+    equivalent array shape so the storage layout survives the strip.
     """
+    source = _rewrite_vector_size(source)
     # __attribute__((...)) — fixed-point loop to handle nested parens
     # since a single regex pass leaves outer ))'s visible.
     prev = None
