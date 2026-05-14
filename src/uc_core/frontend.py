@@ -271,9 +271,16 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
                 tok.name == "IDENT"
                 and state[1] in _TYPESPEC_PREV
                 and tok.text in names
-                and state[5] >= 1   # inside a function/block; never
-                                    # shadow at file scope
+                and (state[4] >= 1 or state[5] >= 1)
+                # Inside a function signature (paren_depth >= 1) or
+                # a block (brace_depth >= 1). File-scope typedef
+                # declarations stay unshadowed.
             ):
+                # Parameters declared in a signature (state[4] >= 1)
+                # need to shadow the typedef in the following body, so
+                # add the shadow at brace_depth + 1 — that matches the
+                # body's brace depth and survives the LPAREN/RPAREN
+                # pair without being popped.
                 target_depth = state[5]
                 if not state[6] or state[6][-1][0] != target_depth + 1:
                     state[6].append((target_depth + 1, set()))
