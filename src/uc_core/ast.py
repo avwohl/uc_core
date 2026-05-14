@@ -233,3 +233,40 @@ _FunctionDef.is_inline = property(_fd_is_inline)
 _FunctionDef.is_variadic = property(_fd_is_variadic)
 _FunctionDef.params = property(_fd_params)
 _FunctionDef.return_type = property(_fd_return_type)
+
+
+# Legacy-compat properties on FloatLiteral. The auto-AST stores the raw
+# source token in ``.value``; the legacy AST had a parsed float there
+# plus is_float / is_imaginary / is_long flag bools. Re-derive them
+# from the token text so codegens that read these attributes keep
+# working without per-site changes.
+from .c23_parser import FloatLiteral as _FloatLiteral
+
+
+def _fl_is_imaginary(self):
+    from ._const import float_is_imaginary
+    return float_is_imaginary(self)
+
+
+def _fl_is_float(self):
+    from ._const import float_is_float
+    return float_is_float(self)
+
+
+def _fl_is_long(self):
+    from ._const import float_is_long
+    return float_is_long(self)
+
+
+_FloatLiteral.is_imaginary = property(_fl_is_imaginary)
+_FloatLiteral.is_float = property(_fl_is_float)
+_FloatLiteral.is_long = property(_fl_is_long)
+
+
+# Auto-AST splits unary into UnaryOp (prefix) vs PostfixOp (postfix).
+# Legacy codegen branches on a unified ``is_prefix`` flag — attach the
+# constant at class level so each variant answers correctly.
+from .c23_parser import UnaryOp as _UnaryOp
+from .c23_parser import PostfixOp as _PostfixOp
+_UnaryOp.is_prefix = True
+_PostfixOp.is_prefix = False
