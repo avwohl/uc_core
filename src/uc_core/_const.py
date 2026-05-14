@@ -18,10 +18,20 @@ def int_value(lit) -> int:
     if not isinstance(lit, ast.IntLiteral):
         raise TypeError(f"int_value: expected IntLiteral, got {type(lit).__name__}")
     text = lit.value.text
-    # Strip C integer-literal suffix.
+    # Strip C integer-literal suffix. b/B are only legal as the
+    # tail of the C23 wb/WB bit-precise-int suffix; standalone
+    # b/B is not a suffix (would eat the hex digit in 0x0b).
     n = len(text)
-    while n > 0 and text[n - 1] in "uUlLwWbB":
-        n -= 1
+    while n > 0:
+        c = text[n - 1]
+        if c in "uUlL":
+            n -= 1
+        elif c in "bB" and n >= 2 and text[n - 2] in "wW":
+            n -= 2
+        elif c in "wW":
+            n -= 1
+        else:
+            break
     text = text[:n]
     text = text.replace("'", "")  # C23 digit separator
     if text.startswith(("0x", "0X")):
@@ -47,16 +57,23 @@ def int_flags(lit) -> tuple[bool, bool, bool, bool]:
         text.startswith("0") and len(text) > 1 and text[1] not in "xXbB."
     )
     n = len(text)
-    while n > 0 and text[n - 1] in "uUlLwWbB":
+    while n > 0:
         c = text[n - 1]
         if c in "uU":
             is_unsigned = True
+            n -= 1
         elif c in "lL":
             if is_long:
                 is_long_long = True
             else:
                 is_long = True
-        n -= 1
+            n -= 1
+        elif c in "bB" and n >= 2 and text[n - 2] in "wW":
+            n -= 2
+        elif c in "wW":
+            n -= 1
+        else:
+            break
     return is_long, is_long_long, is_unsigned, is_hex
 
 
