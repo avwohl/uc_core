@@ -994,9 +994,10 @@ class ASTOptimizer:
             self._collect_address_taken(node.stmt)
         elif isinstance(node, ast.LabelStmt):
             self._collect_address_taken(node.stmt)
+        elif isinstance(node, ast.ReturnStmtValue):
+            self._collect_address_taken(node.value)
         elif isinstance(node, ast.ReturnStmt):
-            if node.value is not None:
-                self._collect_address_taken(node.value)
+            pass  # bare `return;` — nothing to walk
         elif isinstance(node, ast.BinaryOp):
             self._collect_address_taken(node.left)
             self._collect_address_taken(node.right)
@@ -1028,9 +1029,10 @@ class ASTOptimizer:
         if isinstance(expr, ast.IntLiteral):
             return f"INT:{_iv(expr)}:" + str(int_flags(expr))
         if isinstance(expr, ast.CharLiteral):
-            return f"CHR:{_iv(expr)}"
+            from ._const import char_value
+            return f"CHR:{char_value(expr)}"
         if isinstance(expr, ast.Identifier):
-            return f"ID:{expr.name}"
+            return f"ID:{expr.name.text}"
         if isinstance(expr, ast.BinaryOp):
             # Skip assignment and short-circuit ops
             if expr.op in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
