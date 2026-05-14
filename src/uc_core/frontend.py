@@ -207,13 +207,20 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     #     the type-spec (``static const T x;`` etc.).
     #   * ``*`` — same reason; ``T *x;`` parses fine with T as
     #     TYPEDEF_NAME and x as IDENT.
-    _SUPPRESS_PREV = frozenset({
-        "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
+    # Type-spec keywords whose following IDENT is a declarator name
+    # (and therefore shadows the typedef for the enclosing block).
+    _TYPESPEC_PREV = frozenset({
         "KW_VOID", "KW_CHAR", "KW_SHORT", "KW_INT", "KW_LONG",
         "KW_FLOAT", "KW_DOUBLE", "KW_SIGNED", "KW_UNSIGNED",
         "KW_BOOL", "KW_COMPLEX", "KW_IMAGINARY", "KW_NULLPTR",
         "KW_DECIMAL32", "KW_DECIMAL64", "KW_DECIMAL128",
         "KW_BITINT", "KW_INT128",
+    })
+    # Combined: contexts where IDENT → TYPEDEF_NAME rewrite is
+    # suppressed. Includes the type-spec set plus tag/member
+    # namespaces. Tag/member contexts suppress but DON'T shadow.
+    _SUPPRESS_PREV = _TYPESPEC_PREV | frozenset({
+        "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
     })
     # state[0] = offset of the currently-being-filtered token
     # state[1] = name of the previously-distinct token (used as `prev`
@@ -256,13 +263,17 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
             # a declarator name — shadow it for the rest of the
             # enclosing block. This handles ``int byte`` where byte
             # is a typedef-name being re-used as a parameter or local.
+            # Tag-namespace and member-namespace contexts (KW_STRUCT,
+            # DOT, ARROW, etc.) suppress the rewrite but DON'T shadow
+            # the name — `struct Regexp` introduces a tag, not a
+            # variable, and the typedef is still reachable.
             if (
                 tok.name == "IDENT"
-                and state[1] in _SUPPRESS_PREV
+                and state[1] in _TYPESPEC_PREV
                 and tok.text in names
+                and state[5] >= 1   # inside a function/block; never
+                                    # shadow at file scope
             ):
-                # Push a fresh shadow set for the current scope if
-                # there isn't one at this depth yet.
                 target_depth = state[5]
                 if not state[6] or state[6][-1][0] != target_depth + 1:
                     state[6].append((target_depth + 1, set()))
