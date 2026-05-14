@@ -58,6 +58,7 @@ class ResolvedType:
     is_union: bool = False
     members: tuple = ()
     is_vector: bool = False
+    is_packed: bool = False
 
 
 _active_typedef_resolver = None
@@ -211,7 +212,8 @@ def _resolve_struct_spec(spec) -> ResolvedType:
             mbase = resolve_base_type(m.decl_specs)
             members.append((None, mbase, None))
     return ResolvedType(kind="struct", name=name, is_union=is_union,
-                        members=tuple(members))
+                        members=tuple(members),
+                        is_packed=getattr(spec, "is_packed", False))
 
 
 def _resolve_enum_spec(spec) -> ResolvedType:

@@ -91,6 +91,25 @@ _VECTOR_SIZE_RE = re.compile(
 )
 
 
+# `__attribute__((packed))` on struct definitions. The grammar
+# doesn't model attributes, so we strip them at the source level;
+# capture the affected names beforehand and re-attach `is_packed`
+# to the parsed AST.
+#
+# Non-greedy body `\{[^{}]*\}` doesn't handle nested struct
+# definitions — lwIP's packed structs are flat, which is the only
+# real consumer today. Extend if a nested packed struct shows up.
+_PACKED_NAMED_STRUCT_RE = re.compile(
+    r"\bstruct\s+([A-Za-z_]\w*)\s*\{[^{}]*\}\s*"
+    r"__attribute__\s*\(\s*\(\s*(?:__)?packed(?:__)?\s*\)\s*\)"
+)
+_PACKED_TYPEDEF_STRUCT_RE = re.compile(
+    r"\btypedef\s+struct\s*(?:[A-Za-z_]\w*\s*)?\{[^{}]*\}\s*"
+    r"__attribute__\s*\(\s*\(\s*(?:__)?packed(?:__)?\s*\)\s*\)\s*"
+    r"([A-Za-z_]\w*)"
+)
+
+
 def _rewrite_vector_size(source: str, vector_names: set | None = None) -> str:
     """Rewrite ``T name __attribute__((vector_size(N)))`` into
     ``T name[N/sizeof(T)]`` so the resulting array shape is preserved
@@ -386,6 +405,18 @@ def parse(
     # interpreter limit so non-trivial TUs don't overflow.
     if sys.getrecursionlimit() < 50_000:
         sys.setrecursionlimit(50_000)
+    # Record `__attribute__((packed))` targets BEFORE `_strip_attributes`
+    # erases them. Two source-text shapes recognised: a named struct
+    # (`struct foo { ... } __attribute__((packed));`) is keyed by the
+    # tag name; a typedef struct is keyed by the typedef name. The
+    # parser builds the AST with no `is_packed` flag on either shape,
+    # so we re-attach it below.
+    packed_tag_names: set[str] = set()
+    packed_typedef_names: set[str] = set()
+    for m in _PACKED_NAMED_STRUCT_RE.finditer(source):
+        packed_tag_names.add(m.group(1))
+    for m in _PACKED_TYPEDEF_STRUCT_RE.finditer(source):
+        packed_typedef_names.add(m.group(1))
     vector_names: set = set()
     pre = _strip_attributes(source, vector_names)
     hooks, filter_ = _make_typedef_filter(seed_typedefs)
@@ -396,4 +427,87 @@ def parse(
     # rewritten away — downstream consumers (uc386 codegen) read this
     # to flip the GCC is_vector flag on the resolved ArrayType.
     unit._vector_typedef_names = vector_names
+    if packed_tag_names or packed_typedef_names:
+        _mark_packed_structs(unit, packed_tag_names, packed_typedef_names)
     return unit
+
+
+def _mark_packed_structs(
+    unit: ast.TranslationUnit,
+    packed_tag_names: set[str],
+    packed_typedef_names: set[str],
+) -> None:
+    """Re-attach ``is_packed=True`` to ``StructDef`` / ``StructAnon``
+    AST nodes whose source-text decl carried ``__attribute__((packed))``.
+
+    ``StructDef`` (named) is matched by ``decl.name.text``.
+    ``StructAnon`` (typedef'd anonymous struct) is matched by walking
+    the enclosing ``Declaration``'s ``declarators`` for a typedef name
+    that's in ``packed_typedef_names``."""
+    def _visit(node):
+        if node is None:
+            return
+        if isinstance(node, c23_parser.StructDef):
+            tag = getattr(node.name, "text", None)
+            if tag in packed_tag_names:
+                node.is_packed = True
+        if isinstance(node, c23_parser.Declaration):
+            # Typedef case: any typedef declarator whose name is in
+            # `packed_typedef_names` marks every StructAnon in the
+            # decl_specs as packed.
+            decl_names = _typedef_declarator_names(node)
+            if decl_names & packed_typedef_names:
+                for spec in node.decl_specs or ():
+                    if isinstance(spec, c23_parser.StructAnon):
+                        spec.is_packed = True
+                    elif isinstance(spec, c23_parser.StructDef):
+                        spec.is_packed = True
+        # Recurse into common container shapes.
+        for attr in ("items", "members", "decl_specs", "declarators",
+                     "body", "decl_specifiers", "stmt", "init"):
+            child = getattr(node, attr, None)
+            if isinstance(child, list):
+                for c in child:
+                    _visit(c)
+            elif child is not None and hasattr(child, "__dataclass_fields__"):
+                _visit(child)
+    _visit(unit)
+
+
+def _typedef_declarator_names(decl: object) -> set[str]:
+    """Return the set of names declared by a ``typedef`` Declaration's
+    declarators. Returns an empty set if the decl isn't a typedef."""
+    decl_specs = getattr(decl, "decl_specs", None) or ()
+    is_typedef = any(
+        isinstance(s, c23_parser.StorageClass)
+        and getattr(s.kw, "text", None) == "typedef"
+        for s in decl_specs
+    )
+    if not is_typedef:
+        return set()
+    names: set[str] = set()
+    for d in getattr(decl, "declarators", None) or ():
+        # Walk through the declarator nest to find the inner Identifier.
+        name = _innermost_declarator_name(d)
+        if name is not None:
+            names.add(name)
+    return names
+
+
+def _innermost_declarator_name(node) -> str | None:
+    """Pull the innermost identifier name out of a declarator tree."""
+    if node is None:
+        return None
+    if isinstance(node, c23_parser.Token):
+        return node.text
+    # Common attribute names that point at the inner declarator or
+    # name token.
+    for attr in ("name", "declarator", "inner", "decl"):
+        child = getattr(node, attr, None)
+        if isinstance(child, c23_parser.Token):
+            return child.text
+        if child is not None and hasattr(child, "__dataclass_fields__"):
+            n = _innermost_declarator_name(child)
+            if n is not None:
+                return n
+    return None

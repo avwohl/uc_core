@@ -238,6 +238,7 @@ def resolved_to_legacy(rt):
             name=rt.name,
             is_union=rt.is_union,
             members=members,
+            is_packed=rt.is_packed,
         )
     if rt.kind == "enum":
         return _lt.EnumType(name=rt.name)
