@@ -91,3 +91,76 @@ _CallNoArgs.args = ()
 # a default empty list lets callers iterate uniformly.
 from .c23_parser import FnDeclaratorEmpty as _FnDeclaratorEmpty
 _FnDeclaratorEmpty.params = ()
+
+
+# Legacy-compat properties on FunctionDef so codegens reading
+# func.name / func.return_type / func.params / func.is_variadic /
+# func.storage_class / func.is_inline continue to work after the
+# move from the resolved-type FunctionDecl. Each property walks the
+# decl_specs + declarator chain on demand.
+from .c23_parser import FunctionDef as _FunctionDef
+
+
+def _fd_name(self):
+    from .codegen_helpers import declarator_ident
+    return declarator_ident(self.declarator)
+
+
+def _fd_storage_class(self):
+    from .codegen_helpers import decl_storage_class
+    return decl_storage_class(self.decl_specs)
+
+
+def _fd_is_inline(self):
+    from .codegen_helpers import decl_is_inline
+    return decl_is_inline(self.decl_specs)
+
+
+def _fd_is_variadic(self):
+    from .codegen_helpers import function_is_variadic
+    return function_is_variadic(self)
+
+
+def _fd_params(self):
+    """Yield ParamDecl-shaped namespaces for each named parameter,
+    matching the legacy ``FunctionDecl.params`` (list of ParamDecl
+    with .name / .param_type / .size_side_effects)."""
+    from .codegen_helpers import function_params, declarator_ident, resolve_type_from_decl
+
+    class _ParamView:
+        __slots__ = ("name", "param_type", "size_side_effects")
+
+        def __init__(self, name, param_type):
+            self.name = name
+            self.param_type = param_type
+            self.size_side_effects = None
+
+    out = []
+    for p in function_params(self):
+        if isinstance(p, _CallNoArgs.__class__):  # never matches; placeholder
+            continue
+        from . import c23_parser as _cp
+        if isinstance(p, _cp.ParamDecl):
+            _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
+            out.append(_ParamView(declarator_ident(p.declarator), pt))
+        elif isinstance(p, _cp.ParamDeclAbstract):
+            _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
+            out.append(_ParamView(None, pt))
+        elif isinstance(p, _cp.ParamDeclTypeOnly):
+            from .codegen_helpers import resolve_base_type
+            out.append(_ParamView(None, resolve_base_type(p.decl_specs)))
+    return out
+
+
+def _fd_return_type(self):
+    from .codegen_helpers import resolve_type_from_decl
+    _, fn_type = resolve_type_from_decl(self.decl_specs, self.declarator)
+    return fn_type.return_type if fn_type.kind == "function" else fn_type
+
+
+_FunctionDef.name = property(_fd_name)
+_FunctionDef.storage_class = property(_fd_storage_class)
+_FunctionDef.is_inline = property(_fd_is_inline)
+_FunctionDef.is_variadic = property(_fd_is_variadic)
+_FunctionDef.params = property(_fd_params)
+_FunctionDef.return_type = property(_fd_return_type)
