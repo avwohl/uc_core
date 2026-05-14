@@ -25,12 +25,14 @@ def int_value(lit) -> int:
     text = text[:n]
     text = text.replace("'", "")  # C23 digit separator
     if text.startswith(("0x", "0X")):
-        return int(text, 16)
+        # `0x` with nothing after (malformed or macro-expansion residue):
+        # treat as 0 rather than crashing.
+        return int(text[2:], 16) if len(text) > 2 else 0
     if text.startswith(("0b", "0B")):
-        return int(text, 2)
+        return int(text[2:], 2) if len(text) > 2 else 0
     if text.startswith("0") and len(text) > 1 and all(c in "01234567" for c in text[1:]):
         return int(text, 8)
-    return int(text)
+    return int(text) if text else 0
 
 
 def int_flags(lit) -> tuple[bool, bool, bool, bool]:
