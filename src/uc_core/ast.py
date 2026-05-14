@@ -166,17 +166,29 @@ def _fd_params(self):
 
     out = []
     from . import c23_parser as _cp
+    def _decay_for_param(pt):
+        # C: in a function-parameter declaration, `T name[]` and
+        # `T name[N]` are both adjusted to `T *name` (the array's
+        # size, if any, is ignored). Codegen that sees an ArrayType
+        # for a param would otherwise treat it as a frame-local
+        # array and emit lea-based loads.
+        if pt is not None and pt.kind == "array":
+            from .codegen_helpers import ResolvedType
+            return ResolvedType(kind="pointer", pointee=pt.element)
+        return pt
     for p in function_params(self):
         if isinstance(p, _cp.ParamDecl):
             _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
             out.append(_ParamView(declarator_ident(p.declarator),
-                                  resolved_to_legacy(pt)))
+                                  resolved_to_legacy(_decay_for_param(pt))))
         elif isinstance(p, _cp.ParamDeclAbstract):
             _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
-            out.append(_ParamView(None, resolved_to_legacy(pt)))
+            out.append(_ParamView(None,
+                                  resolved_to_legacy(_decay_for_param(pt))))
         elif isinstance(p, _cp.ParamDeclTypeOnly):
             pt = resolve_base_type(p.decl_specs)
-            out.append(_ParamView(None, resolved_to_legacy(pt)))
+            out.append(_ParamView(None,
+                                  resolved_to_legacy(_decay_for_param(pt))))
     return out
 
 
