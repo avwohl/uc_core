@@ -27,6 +27,11 @@ from ._const import int_value, int_flags, make_int_lit
 from .type_config import TypeConfig, Z80_CPM
 
 
+def _iv(lit):
+    """Shorthand for int_value when the caller already knows lit is an IntLiteral."""
+    return int_value(lit)
+
+
 def _expr_has_float(node) -> bool:
     """Lexical detection: does `node`'s subtree contain a FloatLiteral
     or a Cast to a floating type? Used by strength-reduction passes
@@ -159,7 +164,7 @@ class ASTOptimizer:
             # Constant condition → dead code elimination
             # But only if eliminated branches don't contain labels (goto targets)
             if isinstance(stmt.condition, ast.IntLiteral):
-                if stmt.condition.value != 0:
+                if _iv(stmt.condition) != 0:
                     # Always true: eliminate else if it has no labels
                     self._optimize_stmt(stmt.then_branch)
                     if stmt.else_branch is not None:
@@ -206,7 +211,7 @@ class ASTOptimizer:
                 self._clear_all_caches()
             stmt.condition = self._optimize_expr(stmt.condition)
             # while(0) → dead loop body (only if no labels inside)
-            if (isinstance(stmt.condition, ast.IntLiteral) and stmt.condition.value == 0
+            if (isinstance(stmt.condition, ast.IntLiteral) and _iv(stmt.condition) == 0
                     and not self._contains_label(stmt.body)):
                 self._stat("dead_code")
                 self._changed = True
@@ -259,9 +264,8 @@ class ASTOptimizer:
         elif isinstance(stmt, ast.LabelStmt):
             self._optimize_stmt(stmt.stmt)
 
-        elif isinstance(stmt, ast.ReturnStmt):
-            if stmt.value is not None:
-                stmt.value = self._optimize_expr(stmt.value)
+        elif isinstance(stmt, ast.ReturnStmtValue):
+            stmt.value = self._optimize_expr(stmt.value)
 
     @staticmethod
     def _contains_label(node) -> bool:
@@ -331,7 +335,7 @@ class ASTOptimizer:
             if isinstance(expr.condition, ast.IntLiteral):
                 self._stat("ternary_fold")
                 self._changed = True
-                return expr.true_expr if expr.condition.value != 0 else expr.false_expr
+                return expr.true_expr if _iv(expr.condition) != 0 else expr.false_expr
             return expr
         elif isinstance(expr, ast.Call):
             expr.args = [self._optimize_expr(a) for a in expr.args]
@@ -397,13 +401,13 @@ class ASTOptimizer:
             # int width. On 32-bit-int targets, mask=0xFFFFFFFF doesn't
             # mean "long" (which is also 32-bit); only mask > uint_max
             # would force a long-or-wider promotion.
-            is_long = left.is_long or right.is_long or mask > self.type_config.uint_max
+            is_long = int_flags(left)[0] or int_flags(right)[0] or mask > self.type_config.uint_max
             is_long_long = (
-                getattr(left, 'is_long_long', False)
-                or getattr(right, 'is_long_long', False)
+                int_flags(left)[1]
+                or int_flags(right)[1]
                 or mask > self.type_config.ulong_max
             )
-            result = self._fold_constants(op, left.value, right.value, unsigned, mask)
+            result = self._fold_constants(op, _iv(left), _iv(right), unsigned, mask)
             if result is not None:
                 # Convert masked result back to signed representation so that
                 # _is_long_expr doesn't incorrectly promote to 32-bit.
@@ -430,7 +434,7 @@ class ASTOptimizer:
 
         # === Strength reduction: divide/modulo by power-of-2 (unsigned only) ===
         if op == "/" and isinstance(right, ast.IntLiteral):
-            shift = self._log2_if_power_of_2(right.value)
+            shift = self._log2_if_power_of_2(_iv(right))
             if shift is not None and self._is_unsigned_literal(left, right):
                 self._stat("div_to_shift")
                 self._changed = True
@@ -439,12 +443,12 @@ class ASTOptimizer:
                     location=expr.location)
 
         if op == "%" and isinstance(right, ast.IntLiteral):
-            shift = self._log2_if_power_of_2(right.value)
+            shift = self._log2_if_power_of_2(_iv(right))
             if shift is not None and self._is_unsigned_literal(left, right):
                 self._stat("mod_to_and")
                 self._changed = True
                 return ast.BinaryOp(op="&", left=left, right=ast.IntLiteral(
-                    value=right.value - 1, is_unsigned=True, location=right.location),
+                    value=_iv(right) - 1, is_unsigned=True, location=right.location),
                     location=expr.location)
 
         # === Algebraic identity elements ===
@@ -516,7 +520,7 @@ class ASTOptimizer:
 
         # Constant folding for unary operations
         if isinstance(operand, ast.IntLiteral):
-            val = operand.value
+            val = _iv(operand)
             mask = self._literal_mask(operand)
             result = None
             if op == "-":
@@ -531,7 +535,7 @@ class ASTOptimizer:
             # _is_long_expr doesn't incorrectly promote to 32-bit.
             # e.g., -(1) & 0xFFFF = 65535 must be stored as -1, not 65535,
             # otherwise 65535 > 32767 triggers unwanted long promotion.
-            if result is not None and not operand.is_unsigned and op in ("-", "~"):
+            if result is not None and not int_flags(operand)[2] and op in ("-", "~"):
                 half = (mask + 1) >> 1
                 if result >= half:
                     result -= (mask + 1)
@@ -548,9 +552,9 @@ class ASTOptimizer:
                     )
                 return ast.IntLiteral(
                     value=result,
-                    is_long=operand.is_long,
+                    is_long=int_flags(operand)[0],
                     is_long_long=getattr(operand, 'is_long_long', False),
-                    is_unsigned=operand.is_unsigned,
+                    is_unsigned=int_flags(operand)[2],
                     location=expr.location,
                 )
 
@@ -602,7 +606,7 @@ class ASTOptimizer:
         if _expr_has_float(other):
             return None
 
-        val = const.value
+        val = _iv(const)
 
         # x * 0 → 0 (handled by zero elements)
         # x * 1 → x (handled by identity elements)
@@ -652,24 +656,24 @@ class ASTOptimizer:
         def _literal_promotes(lit: ast.Expression, other: ast.Expression) -> bool:
             if not isinstance(lit, ast.IntLiteral):
                 return False
-            if lit.is_unsigned or getattr(lit, 'is_long_long', False):
+            if int_flags(lit)[2] or int_flags(lit)[1]:
                 return True
             return False
 
         l_zero = (
-            isinstance(left, ast.IntLiteral) and left.value == 0
+            isinstance(left, ast.IntLiteral) and _iv(left) == 0
             and not _literal_promotes(left, right)
         )
         r_zero = (
-            isinstance(right, ast.IntLiteral) and right.value == 0
+            isinstance(right, ast.IntLiteral) and _iv(right) == 0
             and not _literal_promotes(right, left)
         )
         l_one = (
-            isinstance(left, ast.IntLiteral) and left.value == 1
+            isinstance(left, ast.IntLiteral) and _iv(left) == 1
             and not _literal_promotes(left, right)
         )
         r_one = (
-            isinstance(right, ast.IntLiteral) and right.value == 1
+            isinstance(right, ast.IntLiteral) and _iv(right) == 1
             and not _literal_promotes(right, left)
         )
 
@@ -729,8 +733,8 @@ class ASTOptimizer:
         left = expr.left
         right = expr.right
 
-        l_zero = isinstance(left, ast.IntLiteral) and left.value == 0
-        r_zero = isinstance(right, ast.IntLiteral) and right.value == 0
+        l_zero = isinstance(left, ast.IntLiteral) and _iv(left) == 0
+        r_zero = isinstance(right, ast.IntLiteral) and _iv(right) == 0
         l_pure = not self._expr_has_side_effects(left)
         r_pure = not self._expr_has_side_effects(right)
 
@@ -773,12 +777,12 @@ class ASTOptimizer:
         right = expr.right
 
         # Determine the effective mask value for 16-bit
-        r_full = isinstance(right, ast.IntLiteral) and (right.value & 0xFFFF) == 0xFFFF and not right.is_long
-        l_full = isinstance(left, ast.IntLiteral) and (left.value & 0xFFFF) == 0xFFFF and not left.is_long
+        r_full = isinstance(right, ast.IntLiteral) and (_iv(right) & 0xFFFF) == 0xFFFF and not int_flags(right)[0]
+        l_full = isinstance(left, ast.IntLiteral) and (_iv(left) & 0xFFFF) == 0xFFFF and not int_flags(left)[0]
 
         # Only safe when the OTHER operand is known to be 16-bit
-        r_safe_16 = isinstance(right, ast.IntLiteral) and not right.is_long
-        l_safe_16 = isinstance(left, ast.IntLiteral) and not left.is_long
+        r_safe_16 = isinstance(right, ast.IntLiteral) and not int_flags(right)[0]
+        l_safe_16 = isinstance(left, ast.IntLiteral) and not int_flags(left)[0]
 
         if op == "&":
             # x & 0xFFFF → x (only when x is 16-bit)
@@ -843,19 +847,19 @@ class ASTOptimizer:
         if not isinstance(right, ast.IntLiteral):
             return None
 
-        c2 = right.value
+        c2 = _iv(right)
 
         if isinstance(left, ast.BinaryOp) and isinstance(left.right, ast.IntLiteral):
             inner_op = left.op
-            c1 = left.right.value
+            c1 = _iv(left.right)
             x = left.left
             # Use wider mask of the two constants
-            is_long = right.is_long or left.right.is_long
+            is_long = int_flags(right)[0] or int_flags(left.right)[0]
             is_long_long = (
-                getattr(right, 'is_long_long', False)
+                int_flags(right)[1]
                 or getattr(left.right, 'is_long_long', False)
             )
-            is_unsigned = right.is_unsigned or left.right.is_unsigned
+            is_unsigned = int_flags(right)[2] or int_flags(left.right)[2]
             mask = max(self._literal_mask(right), self._literal_mask(left.right))
 
             def _new(val: int) -> ast.IntLiteral:
@@ -872,7 +876,7 @@ class ASTOptimizer:
                 combined = (c1 + c2) & mask
                 # Sign-extend: if high bit set, convert to negative
                 sign_bit = (mask + 1) >> 1
-                if combined >= sign_bit and not (right.is_unsigned or left.right.is_unsigned):
+                if combined >= sign_bit and not (int_flags(right)[2] or int_flags(left.right)[2]):
                     combined -= (mask + 1)
                 self._stat("nested_fold")
                 self._changed = True
@@ -883,7 +887,7 @@ class ASTOptimizer:
             if op == "+" and inner_op == "-":
                 combined = (c2 - c1) & mask
                 sign_bit = (mask + 1) >> 1
-                if combined >= sign_bit and not (right.is_unsigned or left.right.is_unsigned):
+                if combined >= sign_bit and not (int_flags(right)[2] or int_flags(left.right)[2]):
                     combined -= (mask + 1)
                 self._stat("nested_fold")
                 self._changed = True
@@ -896,7 +900,7 @@ class ASTOptimizer:
             if op == "-" and inner_op == "+":
                 combined = (c1 - c2) & mask
                 sign_bit = (mask + 1) >> 1
-                if combined >= sign_bit and not (right.is_unsigned or left.right.is_unsigned):
+                if combined >= sign_bit and not (int_flags(right)[2] or int_flags(left.right)[2]):
                     combined -= (mask + 1)
                 self._stat("nested_fold")
                 self._changed = True
@@ -1021,9 +1025,9 @@ class ASTOptimizer:
     def _expr_key(expr: ast.Expression) -> str | None:
         """Return a hashable key for a pure expression, or None if it has side effects."""
         if isinstance(expr, ast.IntLiteral):
-            return f"INT:{expr.value}:{expr.is_long}:{expr.is_unsigned}"
+            return f"INT:{_iv(expr)}:" + str(int_flags(expr))
         if isinstance(expr, ast.CharLiteral):
-            return f"CHR:{expr.value}"
+            return f"CHR:{_iv(expr)}"
         if isinstance(expr, ast.Identifier):
             return f"ID:{expr.name}"
         if isinstance(expr, ast.BinaryOp):
@@ -1275,9 +1279,8 @@ class ASTOptimizer:
             result.update(self._get_modified_vars_in_stmt(stmt.stmt))
         elif isinstance(stmt, ast.LabelStmt):
             result.update(self._get_modified_vars_in_stmt(stmt.stmt))
-        elif isinstance(stmt, ast.ReturnStmt):
-            if stmt.value is not None:
-                result.update(self._get_modified_vars_in_expr(stmt.value))
+        elif isinstance(stmt, ast.ReturnStmtValue):
+            result.update(self._get_modified_vars_in_expr(stmt.value))
         return result
 
     @staticmethod
@@ -1311,8 +1314,8 @@ class ASTOptimizer:
             return ASTOptimizer._stmt_has_calls(stmt.stmt)
         if isinstance(stmt, ast.LabelStmt):
             return ASTOptimizer._stmt_has_calls(stmt.stmt)
-        if isinstance(stmt, ast.ReturnStmt):
-            return stmt.value is not None and ASTOptimizer._expr_has_calls(stmt.value)
+        if isinstance(stmt, ast.ReturnStmtValue):
+            return ASTOptimizer._expr_has_calls(stmt.value)
         if isinstance(stmt, ast.SwitchStmt):
             return ASTOptimizer._expr_has_calls(stmt.expr) or ASTOptimizer._stmt_has_calls(stmt.body)
         return False
@@ -1351,9 +1354,9 @@ class ASTOptimizer:
             if isinstance(e, ast.Identifier):
                 return (0, e.name)
             if isinstance(e, ast.IntLiteral):
-                return (2, e.value)
+                return (2, _iv(e))
             if isinstance(e, ast.CharLiteral):
-                return (2, e.value)
+                return (2, _iv(e))
             # Complex expression
             k = self._expr_key(e)
             return (1, k if k else "")
@@ -1588,7 +1591,7 @@ class ASTOptimizer:
         if not isinstance(init.right, ast.IntLiteral):
             return None
         var_name = init.left.name
-        start_val = init.right.value
+        start_val = _iv(init.right)
 
         # Check condition: var < const, var <= const, var != const
         if not isinstance(cond, ast.BinaryOp):
@@ -1597,7 +1600,7 @@ class ASTOptimizer:
             return None
         if not isinstance(cond.right, ast.IntLiteral):
             return None
-        end_val = cond.right.value
+        end_val = _iv(cond.right)
         cmp_op = cond.op
 
         # Check update: var++ or var += 1
@@ -1605,7 +1608,7 @@ class ASTOptimizer:
         if isinstance(update, ast.UnaryOp) and update.op == "++" and isinstance(update.operand, ast.Identifier) and update.operand.name == var_name:
             step = 1
         elif isinstance(update, ast.BinaryOp) and update.op == "+=" and isinstance(update.left, ast.Identifier) and update.left.name == var_name and isinstance(update.right, ast.IntLiteral):
-            step = update.right.value
+            step = _iv(update.right)
         if step is None or step <= 0:
             return None
 
@@ -1716,7 +1719,7 @@ class ASTOptimizer:
     @staticmethod
     def _is_unsigned_literal(*exprs: ast.Expression) -> bool:
         """Check if any IntLiteral is unsigned."""
-        return any(isinstance(e, ast.IntLiteral) and e.is_unsigned for e in exprs)
+        return any(isinstance(e, ast.IntLiteral) and int_flags(e)[2] for e in exprs)
 
     def _is_effectively_unsigned(self, lit: ast.IntLiteral) -> bool:
         """Check if a literal is effectively unsigned per C standard 6.4.4.1.
@@ -1724,20 +1727,20 @@ class ASTOptimizer:
         For hex/octal constants without U suffix, the type is the first that fits:
         int → unsigned int → long int → unsigned long int → ...
         """
-        if lit.is_unsigned:
+        if int_flags(lit)[2]:
             return True
-        if not lit.is_hex:
+        if not int_flags(lit)[3]:
             return False
         tc = self.type_config
-        if not lit.is_long:
+        if not int_flags(lit)[0]:
             # Exceeds signed int, fits unsigned int?
-            if lit.value > tc.int_max and lit.value <= tc.uint_max:
+            if _iv(lit) > tc.int_max and _iv(lit) <= tc.uint_max:
                 return True
-            if lit.value > tc.long_max and lit.value <= tc.ulong_max:
+            if _iv(lit) > tc.long_max and _iv(lit) <= tc.ulong_max:
                 return True
             return False
         # Hex with L suffix: unsigned long if > LONG_MAX but <= ULONG_MAX
-        if lit.value > tc.long_max and lit.value <= tc.ulong_max:
+        if _iv(lit) > tc.long_max and _iv(lit) <= tc.ulong_max:
             return True
         return False
 
