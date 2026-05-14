@@ -285,6 +285,25 @@ _GotoStmt.target = property(lambda self: self.label.text)
 _StmtExpr.body = property(lambda self: self.stmt)
 _VaArgExpr.ap = property(lambda self: self.va_list_expr)
 
+# GenericSelection: legacy `.associations`, auto-AST `.assocs`.
+from .c23_parser import GenericSelection as _GenericSelection
+_GenericSelection.associations = property(lambda self: self.assocs)
+
+
+# SequenceExpr is the auto-AST representation of `a, b` (the comma
+# operator). uc386's legacy code handles the comma operator via
+# BinaryOp(",", left, right). Expose a fake ``.op`` token so the
+# existing `_opt(expr) == ","` dispatch sites detect SequenceExpr
+# uniformly without needing to be touched.
+from .c23_parser import SequenceExpr as _SequenceExpr, Token as _Token
+
+
+def _seq_op(_self):
+    return _Token(name="COMMA", text=",", line=0, column=0, offset=0, file_id=0)
+
+
+_SequenceExpr.op = property(_seq_op)
+
 
 # Auto-AST Cast / SizeofType / AlignofType / CompoundLiteral /
 # CompoundLiteralEmpty carry ``target_type`` as an ``ast.TypeName`` /

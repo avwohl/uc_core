@@ -967,11 +967,12 @@ class ASTOptimizer:
         elif isinstance(node, ast.ExpressionStmt):
             if node.expr is not None:
                 self._collect_address_taken(node.expr)
-        elif isinstance(node, ast.IfStmt):
+        elif isinstance(node, (ast.IfStmt, ast.IfStmtElse)):
             self._collect_address_taken(node.condition)
             self._collect_address_taken(node.then_branch)
-            if node.else_branch is not None:
-                self._collect_address_taken(node.else_branch)
+            else_b = getattr(node, "else_branch", None)
+            if else_b is not None:
+                self._collect_address_taken(else_b)
         elif isinstance(node, ast.WhileStmt):
             self._collect_address_taken(node.condition)
             self._collect_address_taken(node.body)
