@@ -212,10 +212,13 @@ def resolved_to_legacy(rt):
             is_volatile=rt.is_volatile,
         )
     if rt.kind == "array":
-        return _lt.ArrayType(
+        out = _lt.ArrayType(
             base_type=resolved_to_legacy(rt.element),
             size=rt.size_expr,
         )
+        if rt.is_vector:
+            out.is_vector = True
+        return out
     if rt.kind == "function":
         return _lt.FunctionType(
             return_type=resolved_to_legacy(rt.return_type),

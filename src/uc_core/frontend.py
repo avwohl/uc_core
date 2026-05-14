@@ -91,13 +91,14 @@ _VECTOR_SIZE_RE = re.compile(
 )
 
 
-def _rewrite_vector_size(source: str) -> str:
+def _rewrite_vector_size(source: str, vector_names: set | None = None) -> str:
     """Rewrite ``T name __attribute__((vector_size(N)))`` into
     ``T name[N/sizeof(T)]`` so the resulting array shape is preserved
     after attribute stripping. uc386 codegen reads the array storage
-    layout from the resulting ArrayType; the GCC-specific
-    ``is_vector`` flag isn't reproduced here, but the byte layout is
-    identical."""
+    layout from the resulting ArrayType; if ``vector_names`` is
+    supplied, names that get rewritten are added to it so downstream
+    consumers can flip the GCC-specific ``is_vector`` flag on the
+    resolved type."""
     def repl(m: re.Match) -> str:
         type_part = m.group(1)
         name = m.group(2)
@@ -110,21 +111,25 @@ def _rewrite_vector_size(source: str) -> str:
         count = n_bytes // elem_size if elem_size else 0
         if count <= 0:
             return f"{type_part} {name}"
+        if vector_names is not None:
+            vector_names.add(name)
         return f"{type_part} {name}[{count}]"
 
     return _VECTOR_SIZE_RE.sub(repl, source)
 
 
-def _strip_attributes(source: str) -> str:
+def _strip_attributes(source: str, vector_names: set | None = None) -> str:
     """Strip GCC ``__attribute__`` and C23 ``[[...]]`` attributes, plus
     period DOS-era qualifier keywords (near/far/huge/__cdecl/__pascal/
     etc.). None of these are modelled by the c23 grammar; we erase
     them at the source level so the uplox parser sees clean C23.
 
     ``__attribute__((vector_size(N)))`` is rewritten first into an
-    equivalent array shape so the storage layout survives the strip.
+    equivalent array shape so the storage layout survives the strip;
+    names rewritten this way are recorded in ``vector_names`` (if
+    supplied) so consumers can flag them later.
     """
-    source = _rewrite_vector_size(source)
+    source = _rewrite_vector_size(source, vector_names)
     # __attribute__((...)) — fixed-point loop to handle nested parens
     # since a single regex pass leaves outer ))'s visible.
     prev = None
@@ -271,8 +276,14 @@ def parse(
     # interpreter limit so non-trivial TUs don't overflow.
     if sys.getrecursionlimit() < 50_000:
         sys.setrecursionlimit(50_000)
-    pre = _strip_attributes(source)
+    vector_names: set = set()
+    pre = _strip_attributes(source, vector_names)
     hooks, filter_ = _make_typedef_filter(seed_typedefs)
-    return c23_parser.parse(
+    unit = c23_parser.parse(
         pre, filename=filename, hooks=hooks, token_filter=filter_
     )
+    # Attach the set of names that had `__attribute__((vector_size(N)))`
+    # rewritten away — downstream consumers (uc386 codegen) read this
+    # to flip the GCC is_vector flag on the resolved ArrayType.
+    unit._vector_typedef_names = vector_names
+    return unit

@@ -40,6 +40,9 @@ class ResolvedType:
                        members (list[(name, ResolvedType, bit_width)])
     kind == "enum":    name (Optional[str])
     kind == "typedef": name (str)  # unresolved typedef-name reference
+
+    ``is_vector`` is GCC's __attribute__((vector_size)) marker on array
+    types — codegens use it to route through SIMD-shaped paths.
     """
     kind: str
     name: Optional[str] = None
@@ -54,6 +57,7 @@ class ResolvedType:
     is_variadic: bool = False
     is_union: bool = False
     members: tuple = ()
+    is_vector: bool = False
 
 
 _active_typedef_resolver = None
