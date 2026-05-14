@@ -66,7 +66,31 @@ TypeofType = _Removed
 TypesCompatibleP = _Removed
 LabelAddr = _Removed
 AsmStmt = _Removed
-Compound = _Removed  # legacy compound-literal (Phase 6 uses CompoundLiteral)
+# Legacy alias: codegens that branch on `ast.Compound` continue to
+# detect the auto-AST's `CompoundLiteral` form. The empty variant
+# (`(T){}`) is also accepted.
+from .c23_parser import (
+    CompoundLiteral as _CompoundLiteralForAlias,
+    CompoundLiteralEmpty as _CompoundLiteralEmptyForAlias,
+    InitializerList as _InitializerListForAlias,
+)
+Compound = _CompoundLiteralForAlias
+
+
+# Legacy `Compound.init` was an InitializerList wrapping the values;
+# the auto-AST stores the values directly in `.items`. Expose `.init`
+# as a synthetic InitializerList view so legacy `compound.init.values`
+# walks find the values uniformly.
+def _cl_init(self):
+    return _InitializerListForAlias(values=self.items, pos=self.pos)
+
+
+def _cle_init(self):
+    return _InitializerListForAlias(values=[], pos=self.pos)
+
+
+_CompoundLiteralForAlias.init = property(_cl_init)
+_CompoundLiteralEmptyForAlias.init = property(_cle_init)
 SourceLocation = _Removed
 Node = _Removed
 TypeNode = _Removed
