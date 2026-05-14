@@ -190,31 +190,92 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     # a tag and a typedef can share a name, e.g.
     # ``typedef struct Regexp Regexp;``). Also suppress after ``.`` or
     # ``->`` since member references live in their own namespace too.
+    # Token names after which an IDENT should NOT be rewritten to
+    # TYPEDEF_NAME. Cases:
+    #   * After ``struct`` / ``union`` / ``enum`` — tag namespace.
+    #   * After ``.`` / ``->`` — member namespace.
+    #   * After a concrete type-spec keyword. ``int byte`` is a
+    #     parameter declaration where ``byte`` is the declarator name
+    #     even if ``byte`` is typedef'd elsewhere; C allows re-using
+    #     a typedef-name as a plain identifier in inner scopes.
+    # Excluded on purpose:
+    #   * Storage classes (``static``, ``extern``, ``register``,
+    #     ``auto``, ``inline``, ``constexpr``, ``thread_local``) and
+    #     type qualifiers (``const``, ``volatile``, ``restrict``,
+    #     ``_Atomic``) — these introduce or qualify a type, and the
+    #     next IDENT might legitimately be a typedef-name acting as
+    #     the type-spec (``static const T x;`` etc.).
+    #   * ``*`` — same reason; ``T *x;`` parses fine with T as
+    #     TYPEDEF_NAME and x as IDENT.
     _SUPPRESS_PREV = frozenset({
         "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
+        "KW_VOID", "KW_CHAR", "KW_SHORT", "KW_INT", "KW_LONG",
+        "KW_FLOAT", "KW_DOUBLE", "KW_SIGNED", "KW_UNSIGNED",
+        "KW_BOOL", "KW_COMPLEX", "KW_IMAGINARY", "KW_NULLPTR",
+        "KW_DECIMAL32", "KW_DECIMAL64", "KW_DECIMAL128",
+        "KW_BITINT", "KW_INT128",
     })
     # state[0] = offset of the currently-being-filtered token
     # state[1] = name of the previously-distinct token (used as `prev`
     #            for the suppress check)
     # state[2] = name of the currently-being-filtered token
+    # state[3] = previously-distinct token's *text* (used when we need
+    #            to register a typedef-name as locally-shadowed)
+    # state[4] = current paren depth (for parameter-name shadowing)
+    # state[5] = current brace depth
+    # state[6] = stack of (brace_depth_at_entry, set_of_shadowed_names)
+    #            so when the brace depth drops back, we pop the
+    #            shadow set added by the matching scope.
     # The parser may re-query the same offset multiple times during
     # lookahead; only advance state when the offset changes so the
     # `prev` context stays stable for a given token.
-    state = [-1, "", ""]
+    state = [-1, "", "", "", 0, 0, []]
 
     def filter_(_ctx, tok: Token) -> Token:
         offset = getattr(tok, "offset", -1)
         if offset != state[0]:
-            # New token: previous distinct name becomes what this
-            # token's current name was (i.e. the token before this one).
+            # New token: roll previous-distinct into history slots,
+            # then update depth counters.
             state[1] = state[2]
+            state[3] = "" if state[1] == "" else state[3]
             state[2] = tok.name
             state[0] = offset
+            # When we close a brace, drop any shadow set whose
+            # entry-depth matches the brace count we just exited.
+            if tok.name == "RBRACE":
+                state[5] -= 1
+                while state[6] and state[6][-1][0] > state[5]:
+                    state[6].pop()
+            elif tok.name == "LBRACE":
+                state[5] += 1
+            elif tok.name == "LPAREN":
+                state[4] += 1
+            elif tok.name == "RPAREN":
+                state[4] = max(0, state[4] - 1)
+            # When an IDENT follows a concrete type-spec keyword, it's
+            # a declarator name — shadow it for the rest of the
+            # enclosing block. This handles ``int byte`` where byte
+            # is a typedef-name being re-used as a parameter or local.
+            if (
+                tok.name == "IDENT"
+                and state[1] in _SUPPRESS_PREV
+                and tok.text in names
+            ):
+                # Push a fresh shadow set for the current scope if
+                # there isn't one at this depth yet.
+                target_depth = state[5]
+                if not state[6] or state[6][-1][0] != target_depth + 1:
+                    state[6].append((target_depth + 1, set()))
+                state[6][-1][1].add(tok.text)
         prev_name = state[1]
+        # Walk the shadow stack: if any frame contains this name, the
+        # IDENT is shadowed; don't rewrite.
+        shadowed = any(tok.text in s for _d, s in state[6])
         if (
             tok.name == "IDENT"
             and tok.text in names
             and prev_name not in _SUPPRESS_PREV
+            and not shadowed
         ):
             return Token(
                 name="TYPEDEF_NAME",
