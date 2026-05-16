@@ -10,7 +10,7 @@ readme = "README.md"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.10"
 dependencies = [
-    "uplox>=3.0.0",
+    "uplox>=3.1.0",
 ]
 authors = [
     {name = "uc_core developers"}
