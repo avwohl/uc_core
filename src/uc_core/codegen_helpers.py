@@ -40,6 +40,12 @@ class ResolvedType:
                        members (list[(name, ResolvedType, bit_width)])
     kind == "enum":    name (Optional[str])
     kind == "typedef": name (str)  # unresolved typedef-name reference
+    kind == "typeof":  typeof_operand (auto-AST expr) — the operand of
+                       a ``typeof(expr)`` / ``__typeof__(expr)`` type
+                       specifier. resolved_to_legacy() maps this to an
+                       ``ast_legacy.TypeofType`` which the host codegen
+                       resolves (walks the operand to its real type)
+                       in its pre-codegen typeof pass.
 
     ``is_vector`` is GCC's __attribute__((vector_size)) marker on array
     types — codegens use it to route through SIMD-shaped paths.
@@ -59,6 +65,7 @@ class ResolvedType:
     members: tuple = ()
     is_vector: bool = False
     is_packed: bool = False
+    typeof_operand: Optional[object] = None  # kind == "typeof"
 
 
 _active_typedef_resolver = None
@@ -139,6 +146,19 @@ def resolve_base_type(decl_specs) -> ResolvedType:
             explicit = _resolve_enum_spec(spec)
         elif isinstance(spec, ast.BitIntSpec):
             explicit = ResolvedType(kind="basic", name="int")
+        elif isinstance(spec, (ast.TypeofExpr, ast.TypeofUnqualExpr)):
+            # `typeof(expr)` / `__typeof__(expr)` as a type specifier.
+            # We can't resolve the operand's type here (no symbol
+            # table at this layer); carry the operand through as a
+            # "typeof" ResolvedType. resolved_to_legacy() turns it
+            # into an ast_legacy.TypeofType, which the host codegen's
+            # pre-pass resolves by walking the operand. Without this
+            # branch the spec was silently dropped and every typeof
+            # collapsed to `int` — breaking `.`/`->`/`*` on
+            # typeof-typed entities and the offsetof/container_of
+            # idiom (typeof is pervasive in real-world C, e.g. git).
+            explicit = ResolvedType(kind="typeof",
+                                    typeof_operand=spec.operand)
     if explicit is None:
         name = _reduce_type_keywords(type_keywords)
         explicit = ResolvedType(kind="basic", name=name, is_signed=signed)

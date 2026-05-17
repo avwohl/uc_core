@@ -264,6 +264,11 @@ def resolved_to_legacy(rt):
         # Unresolved typedef-name reference. uc_core has no typedef
         # table at this level; fall back to int.
         return _lt.BasicType(name=rt.name or "int")
+    if rt.kind == "typeof":
+        # `typeof(expr)` type specifier — hand the operand to the
+        # host codegen as a legacy TypeofType; its pre-codegen pass
+        # walks the operand and substitutes the concrete type.
+        return _lt.TypeofType(operand=rt.typeof_operand)
     return None
 
 
