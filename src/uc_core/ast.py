@@ -63,7 +63,11 @@ StructType = _Removed
 EnumType = _Removed
 ComplexType = _Removed
 TypeofType = _Removed
-TypesCompatibleP = _Removed
+# NB: `TypesCompatibleP` is NOT tombstoned — the c23 grammar now has a
+# `__builtin_types_compatible_p(type-name, type-name)` production, so
+# the uplox auto-AST emits a real `TypesCompatibleP` node (t1/t2).
+# `from .c23_parser import *` above brings it in; don't shadow it
+# (codegen's `isinstance(expr, ast.TypesCompatibleP)` depends on it).
 LabelAddr = _Removed
 AsmStmt = _Removed
 # Legacy alias: codegens that branch on `ast.Compound` continue to
