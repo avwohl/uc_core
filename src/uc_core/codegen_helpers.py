@@ -529,13 +529,44 @@ def decode_string_literal(text: str) -> str:
         body = text[1:-1]
     else:
         body = text
+    # Simple single-char escapes. `\0` is intentionally NOT here — it
+    # is the 1-digit case of the octal-escape rule below (so `\033`,
+    # `\377`, … decode correctly instead of `\0` + literal digits).
     esc = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", "'": "'", '"': '"',
-           "0": "\0", "a": "\a", "b": "\b", "f": "\f", "v": "\v"}
+           "a": "\a", "b": "\b", "f": "\f", "v": "\v"}
+    _OCT = "01234567"
+    _HEX = "0123456789abcdefABCDEF"
     out: list[str] = []
     i = 0
-    while i < len(body):
-        if body[i] == "\\" and i + 1 < len(body):
+    n = len(body)
+    while i < n:
+        if body[i] == "\\" and i + 1 < n:
             nxt = body[i + 1]
+            # Hex escape: `\x` then 1+ hex digits (C consumes them all;
+            # truncate to a byte, matching gcc for char strings).
+            if nxt in ("x", "X"):
+                j = i + 2
+                hexd = ""
+                while j < n and body[j] in _HEX:
+                    hexd += body[j]
+                    j += 1
+                if hexd:
+                    out.append(chr(int(hexd, 16) & 0xFF))
+                    i = j
+                    continue
+                out.append(nxt)        # `\x` with no digits — literal
+                i += 2
+                continue
+            # Octal escape: `\` then 1–3 octal digits.
+            if nxt in _OCT:
+                j = i + 1
+                octd = ""
+                while j < n and len(octd) < 3 and body[j] in _OCT:
+                    octd += body[j]
+                    j += 1
+                out.append(chr(int(octd, 8) & 0xFF))
+                i = j
+                continue
             if nxt in esc:
                 out.append(esc[nxt])
                 i += 2
@@ -553,24 +584,10 @@ def string_is_wide(text: str) -> bool:
 
 
 def decoded_str_len(text: str) -> int:
-    if text.startswith("u8"):
-        text = text[2:]
-    elif text.startswith(("u", "U", "L")):
-        text = text[1:]
-    if text.startswith('"') and text.endswith('"'):
-        body = text[1:-1]
-    else:
-        body = text
-    n = 0
-    i = 0
-    while i < len(body):
-        if body[i] == "\\" and i + 1 < len(body):
-            i += 2
-            n += 1
-        else:
-            i += 1
-            n += 1
-    return n
+    # Exact count of decoded bytes/codepoints — derive it from the
+    # decoder so multi-digit octal (`\033`) and hex (`\xff`) escapes
+    # count as one element, not as `\0` + literal digits.
+    return len(decode_string_literal(text))
 
 
 def rewrite_str_token(string_lit, rewriter) -> None:

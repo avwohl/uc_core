@@ -38211,7 +38211,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         "lhs": "matched_iteration_stmt",
         "rhs": [
           "KW_DO",
-          "matched_stmt",
+          "stmt",
           "KW_WHILE",
           "LPAREN",
           "expr",
@@ -48913,29 +48913,29 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "CHAR_LIT": "s80",
           "DEC": "s81",
           "FLOAT_LIT": "s82",
-          "IDENT": "s372",
+          "IDENT": "s238",
           "INC": "s84",
           "INT_LIT": "s85",
           "KW_ALIGNOF": "s86",
           "KW_BREAK": "s239",
-          "KW_CASE": "s373",
+          "KW_CASE": "s240",
           "KW_CONTINUE": "s241",
-          "KW_DEFAULT": "s374",
+          "KW_DEFAULT": "s242",
           "KW_DO": "s243",
-          "KW_FOR": "s375",
+          "KW_FOR": "s244",
           "KW_GENERIC": "s87",
           "KW_GOTO": "s245",
-          "KW_IF": "s376",
+          "KW_IF": "s246",
           "KW_IMAG": "s88",
           "KW_NULLPTR": "s89",
           "KW_OFFSETOF": "s90",
           "KW_REAL": "s91",
           "KW_RETURN": "s248",
           "KW_SIZEOF": "s92",
-          "KW_SWITCH": "s377",
+          "KW_SWITCH": "s249",
           "KW_TYPES_COMPATIBLE_P": "s93",
           "KW_VA_ARG": "s94",
-          "KW_WHILE": "s378",
+          "KW_WHILE": "s250",
           "LBRACE": "s141",
           "LPAREN": "s95",
           "MINUS": "s96",
@@ -48962,47 +48962,52 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 379,
+          "matched_stmt": 265,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
           "primary_expr": 113,
           "relational_expr": 114,
           "shift_expr": 115,
+          "stmt": 372,
           "string_literal": 116,
           "string_piece": 117,
-          "unary_expr": 134
+          "unary_expr": 134,
+          "unmatched_if": 269,
+          "unmatched_iteration_stmt": 270,
+          "unmatched_stmt": 271,
+          "unmatched_switch_stmt": 272
         },
         "id": 243
       },
       {
         "actions": {
-          "LPAREN": "s380"
+          "LPAREN": "s373"
         },
         "gotos": {},
         "id": 244
       },
       {
         "actions": {
-          "IDENT": "s381"
+          "IDENT": "s374"
         },
         "gotos": {},
         "id": 245
       },
       {
         "actions": {
-          "LPAREN": "s382"
+          "LPAREN": "s375"
         },
         "gotos": {},
         "id": 246
       },
       {
         "actions": {
-          "IDENT": "s383"
+          "IDENT": "s376"
         },
         "gotos": {
-          "label_decl_name": 384,
-          "label_decl_names": 385
+          "label_decl_name": 377,
+          "label_decl_names": 378
         },
         "id": 247
       },
@@ -49028,7 +49033,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "SEMI": "s386",
+          "SEMI": "s379",
           "STAR": "s98",
           "STRING_LIT": "s99",
           "TILDE": "s100"
@@ -49041,7 +49046,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 387,
+          "expr": 380,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -49058,14 +49063,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "LPAREN": "s388"
+          "LPAREN": "s381"
         },
         "gotos": {},
         "id": 249
       },
       {
         "actions": {
-          "LPAREN": "s389"
+          "LPAREN": "s382"
         },
         "gotos": {},
         "id": 250
@@ -49483,7 +49488,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACE": "s390",
+          "RBRACE": "s383",
           "SEMI": "s252",
           "STAR": "s98",
           "STRING_LIT": "s99",
@@ -49496,7 +49501,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "and_expr": 102,
           "asm_declaration": 253,
           "assignment_expr": 131,
-          "block_item": 391,
+          "block_item": 384,
           "cast_expr": 103,
           "compound_stmt": 256,
           "conditional_expr": 132,
@@ -49712,7 +49717,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       {
         "actions": {
           "COMMA": "s219",
-          "SEMI": "s392"
+          "SEMI": "s385"
         },
         "gotos": {},
         "id": 258
@@ -50931,7 +50936,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         "gotos": {
           "type_qualifier": 137,
           "type_qualifier_list": 138,
-          "type_qualifier_list_opt": 393
+          "type_qualifier_list_opt": 386
         },
         "id": 273
       },
@@ -50955,7 +50960,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_REAL": "r114",
           "KW_RESTRICT": "s25",
           "KW_SIZEOF": "r114",
-          "KW_STATIC": "s394",
+          "KW_STATIC": "s387",
           "KW_TYPES_COMPATIBLE_P": "r114",
           "KW_VA_ARG": "r114",
           "KW_VOLATILE": "s38",
@@ -50994,8 +50999,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACKET": "s395",
-          "STAR": "s396",
+          "RBRACKET": "s388",
+          "STAR": "s389",
           "STRING_LIT": "s99",
           "TILDE": "s100"
         },
@@ -51003,7 +51008,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 397,
+          "conditional_expr": 390,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -51076,20 +51081,20 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_VOID": "s37",
           "KW_VOLATILE": "s38",
           "LBRACKET": "s180",
-          "LPAREN": "s398",
+          "LPAREN": "s391",
           "RPAREN": "r133",
           "STAR": "s67",
           "TYPEDEF_NAME": "s40"
         },
         "gotos": {
-          "abstract_declarator": 399,
+          "abstract_declarator": 392,
           "alignment_specifier": 41,
           "decl_spec": 68,
-          "declarator": 400,
+          "declarator": 393,
           "direct_abstract_declarator": 183,
           "direct_declarator": 70,
           "enum_specifier": 46,
-          "pointer": 401,
+          "pointer": 394,
           "storage_class": 49,
           "struct_or_union": 50,
           "struct_or_union_specifier": 51,
@@ -51109,7 +51114,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "COMMA": "s402",
+          "COMMA": "s395",
           "RPAREN": "r127"
         },
         "gotos": {},
@@ -51117,7 +51122,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "RPAREN": "s403"
+          "RPAREN": "s396"
         },
         "gotos": {},
         "id": 280
@@ -51245,7 +51250,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_UNSIGNED": "s36",
           "KW_VOID": "s37",
           "KW_VOLATILE": "s38",
-          "RBRACE": "s404",
+          "RBRACE": "s397",
           "TYPEDEF_NAME": "s40"
         },
         "gotos": {
@@ -51293,7 +51298,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 405,
+          "conditional_expr": 398,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -51358,7 +51363,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "COLON": "s406",
+          "COLON": "s399",
           "COMMA": "r92",
           "SEMI": "r92"
         },
@@ -51376,8 +51381,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "COMMA": "s407",
-          "SEMI": "s408"
+          "COMMA": "s400",
+          "SEMI": "s401"
         },
         "gotos": {},
         "id": 290
@@ -51482,49 +51487,49 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "RPAREN": "s409"
+          "RPAREN": "s402"
         },
         "gotos": {},
         "id": 293
       },
       {
         "actions": {
-          "RPAREN": "s410"
+          "RPAREN": "s403"
         },
         "gotos": {},
         "id": 294
       },
       {
         "actions": {
-          "COMMA": "s411"
+          "COMMA": "s404"
         },
         "gotos": {},
         "id": 295
       },
       {
         "actions": {
-          "COMMA": "s412"
+          "COMMA": "s405"
         },
         "gotos": {},
         "id": 296
       },
       {
         "actions": {
-          "RPAREN": "s413"
+          "RPAREN": "s406"
         },
         "gotos": {},
         "id": 297
       },
       {
         "actions": {
-          "COMMA": "s414"
+          "COMMA": "s407"
         },
         "gotos": {},
         "id": 298
       },
       {
         "actions": {
-          "COMMA": "s415"
+          "COMMA": "s408"
         },
         "gotos": {},
         "id": 299
@@ -51648,7 +51653,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_SIZEOF": "s92",
           "KW_TYPES_COMPATIBLE_P": "s93",
           "KW_VA_ARG": "s94",
-          "LBRACE": "s416",
+          "LBRACE": "s409",
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
@@ -51657,7 +51662,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "TILDE": "s100"
         },
         "gotos": {
-          "cast_expr": 417,
+          "cast_expr": 410,
           "postfix_expr": 112,
           "primary_expr": 113,
           "string_literal": 116,
@@ -51784,7 +51789,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         "gotos": {
           "type_qualifier": 137,
           "type_qualifier_list": 138,
-          "type_qualifier_list_opt": 418
+          "type_qualifier_list_opt": 411
         },
         "id": 306
       },
@@ -51808,7 +51813,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_REAL": "r114",
           "KW_RESTRICT": "s25",
           "KW_SIZEOF": "r114",
-          "KW_STATIC": "s419",
+          "KW_STATIC": "s412",
           "KW_TYPES_COMPATIBLE_P": "r114",
           "KW_VA_ARG": "r114",
           "KW_VOLATILE": "s38",
@@ -51847,8 +51852,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACKET": "s420",
-          "STAR": "s421",
+          "RBRACKET": "s413",
+          "STAR": "s414",
           "STRING_LIT": "s99",
           "TILDE": "s100"
         },
@@ -51856,7 +51861,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 422,
+          "conditional_expr": 415,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -51887,14 +51892,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "RPAREN": "s423"
+          "RPAREN": "s416"
         },
         "gotos": {},
         "id": 310
       },
       {
         "actions": {
-          "RPAREN": "s424"
+          "RPAREN": "s417"
         },
         "gotos": {},
         "id": 311
@@ -51919,7 +51924,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_REAL": "r115",
           "KW_RESTRICT": "s25",
           "KW_SIZEOF": "r115",
-          "KW_STATIC": "s425",
+          "KW_STATIC": "s418",
           "KW_TYPES_COMPATIBLE_P": "r115",
           "KW_VA_ARG": "r115",
           "KW_VOLATILE": "s38",
@@ -51933,8 +51938,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "gotos": {
           "type_qualifier": 137,
-          "type_qualifier_list": 426,
-          "type_qualifier_list_opt": 427
+          "type_qualifier_list": 419,
+          "type_qualifier_list_opt": 420
         },
         "id": 312
       },
@@ -51976,7 +51981,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_UNSIGNED": "s36",
           "KW_VOID": "s37",
           "KW_VOLATILE": "s38",
-          "RPAREN": "s428",
+          "RPAREN": "s421",
           "TYPEDEF_NAME": "s40"
         },
         "gotos": {
@@ -51986,7 +51991,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "enum_specifier": 46,
           "parameter": 278,
           "parameter_list": 279,
-          "parameter_type_list": 429,
+          "parameter_type_list": 422,
           "storage_class": 49,
           "struct_or_union": 50,
           "struct_or_union_specifier": 51,
@@ -52128,7 +52133,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "COLON": "s430",
+          "COLON": "s423",
           "COMMA": "s219"
         },
         "gotos": {},
@@ -52336,7 +52341,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       {
         "actions": {
           "COMMA": "s219",
-          "RBRACKET": "s431"
+          "RBRACKET": "s424"
         },
         "gotos": {},
         "id": 327
@@ -52393,8 +52398,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "COMMA": "s432",
-          "RPAREN": "s433"
+          "COMMA": "s425",
+          "RPAREN": "s426"
         },
         "gotos": {},
         "id": 329
@@ -52576,11 +52581,11 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "COLON": "s434",
-          "RPAREN": "s435"
+          "COLON": "s427",
+          "RPAREN": "s428"
         },
         "gotos": {
-          "asm_clause": 436
+          "asm_clause": 429
         },
         "id": 337
       },
@@ -52597,7 +52602,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       {
         "actions": {
           "IDENT": "s127",
-          "RBRACE": "s437"
+          "RBRACE": "s430"
         },
         "gotos": {
           "enumerator": 343
@@ -52728,7 +52733,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "RPAREN": "s438"
+          "RPAREN": "s431"
         },
         "gotos": {},
         "id": 344
@@ -52975,7 +52980,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "IDENT": "s439"
+          "IDENT": "s432"
         },
         "gotos": {},
         "id": 358
@@ -53010,7 +53015,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 440,
+          "conditional_expr": 433,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -53082,7 +53087,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
-          "initializer": 441,
+          "initializer": 434,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
           "multiplicative_expr": 111,
@@ -53108,12 +53113,12 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "ASSIGN": "s442",
+          "ASSIGN": "s435",
           "DOT": "s358",
           "LBRACKET": "s359"
         },
         "gotos": {
-          "designator": 443
+          "designator": 436
         },
         "id": 364
       },
@@ -53128,8 +53133,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "COMMA": "s444",
-          "RBRACE": "s445"
+          "COMMA": "s437",
+          "RBRACE": "s438"
         },
         "gotos": {},
         "id": 366
@@ -53219,8 +53224,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "compound_stmt": 256,
           "conditional_expr": 132,
           "decl_spec": 43,
-          "decl_specs": 446,
-          "declaration": 447,
+          "decl_specs": 439,
+          "declaration": 440,
           "enum_specifier": 46,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
@@ -53232,7 +53237,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 448,
+          "matched_stmt": 441,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
@@ -53249,7 +53254,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "unary_expr": 134,
           "unmatched_if": 269,
           "unmatched_iteration_stmt": 270,
-          "unmatched_stmt": 449,
+          "unmatched_stmt": 442,
           "unmatched_switch_stmt": 272
         },
         "id": 367
@@ -53341,7 +53346,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
       },
       {
         "actions": {
-          "COLON": "s450"
+          "COLON": "s443"
         },
         "gotos": {},
         "id": 369
@@ -53487,7 +53492,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 451,
+          "matched_stmt": 444,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
@@ -53499,144 +53504,17 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "unary_expr": 134,
           "unmatched_if": 269,
           "unmatched_iteration_stmt": 270,
-          "unmatched_stmt": 452,
+          "unmatched_stmt": 445,
           "unmatched_switch_stmt": 272
         },
         "id": 371
       },
       {
         "actions": {
-          "AMP": "r294",
-          "AMP_EQ": "r294",
-          "ARROW": "r294",
-          "ASSIGN": "r294",
-          "CARET": "r294",
-          "CARET_EQ": "r294",
-          "COLON": "s453",
-          "COMMA": "r294",
-          "DEC": "r294",
-          "DOT": "r294",
-          "EQ": "r294",
-          "GE": "r294",
-          "GT": "r294",
-          "INC": "r294",
-          "LAND": "r294",
-          "LBRACKET": "r294",
-          "LE": "r294",
-          "LOR": "r294",
-          "LPAREN": "r294",
-          "LSHIFT": "r294",
-          "LSHIFT_EQ": "r294",
-          "LT": "r294",
-          "MINUS": "r294",
-          "MINUS_EQ": "r294",
-          "NE": "r294",
-          "PERCENT": "r294",
-          "PERCENT_EQ": "r294",
-          "PIPE": "r294",
-          "PIPE_EQ": "r294",
-          "PLUS": "r294",
-          "PLUS_EQ": "r294",
-          "QUESTION": "r294",
-          "RSHIFT": "r294",
-          "RSHIFT_EQ": "r294",
-          "SEMI": "r294",
-          "SLASH": "r294",
-          "SLASH_EQ": "r294",
-          "STAR": "r294",
-          "STAR_EQ": "r294"
+          "KW_WHILE": "s446"
         },
         "gotos": {},
         "id": 372
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s83",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_GENERIC": "s87",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_SIZEOF": "s92",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "cast_expr": 103,
-          "conditional_expr": 454,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "inclusive_or_expr": 108,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 119
-        },
-        "id": 373
-      },
-      {
-        "actions": {
-          "COLON": "s455"
-        },
-        "gotos": {},
-        "id": 374
-      },
-      {
-        "actions": {
-          "LPAREN": "s456"
-        },
-        "gotos": {},
-        "id": 375
-      },
-      {
-        "actions": {
-          "LPAREN": "s457"
-        },
-        "gotos": {},
-        "id": 376
-      },
-      {
-        "actions": {
-          "LPAREN": "s458"
-        },
-        "gotos": {},
-        "id": 377
-      },
-      {
-        "actions": {
-          "LPAREN": "s459"
-        },
-        "gotos": {},
-        "id": 378
-      },
-      {
-        "actions": {
-          "KW_WHILE": "s460"
-        },
-        "gotos": {},
-        "id": 379
       },
       {
         "actions": {
@@ -53710,14 +53588,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "cast_expr": 103,
           "conditional_expr": 132,
           "decl_spec": 43,
-          "decl_specs": 446,
-          "declaration": 461,
+          "decl_specs": 439,
+          "declaration": 447,
           "enum_specifier": 46,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "expr": 258,
-          "expression_stmt": 462,
-          "for_init": 463,
+          "expression_stmt": 448,
+          "for_init": 449,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -53735,14 +53613,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "type_spec": 56,
           "unary_expr": 134
         },
-        "id": 380
+        "id": 373
       },
       {
         "actions": {
-          "SEMI": "s464"
+          "SEMI": "s450"
         },
         "gotos": {},
-        "id": 381
+        "id": 374
       },
       {
         "actions": {
@@ -53778,7 +53656,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 465,
+          "expr": 451,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -53791,7 +53669,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 382
+        "id": 375
       },
       {
         "actions": {
@@ -53800,7 +53678,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 189,
         "gotos": {},
-        "id": 383
+        "id": 376
       },
       {
         "actions": {
@@ -53809,15 +53687,15 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 187,
         "gotos": {},
-        "id": 384
+        "id": 377
       },
       {
         "actions": {
-          "COMMA": "s466",
-          "SEMI": "s467"
+          "COMMA": "s452",
+          "SEMI": "s453"
         },
         "gotos": {},
-        "id": 385
+        "id": 378
       },
       {
         "actions": {
@@ -53902,15 +53780,15 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 201,
         "gotos": {},
-        "id": 386
+        "id": 379
       },
       {
         "actions": {
           "COMMA": "s219",
-          "SEMI": "s468"
+          "SEMI": "s454"
         },
         "gotos": {},
-        "id": 387
+        "id": 380
       },
       {
         "actions": {
@@ -53946,7 +53824,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 469,
+          "expr": 455,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -53959,7 +53837,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 388
+        "id": 381
       },
       {
         "actions": {
@@ -53995,7 +53873,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 470,
+          "expr": 456,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -54008,7 +53886,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 389
+        "id": 382
       },
       {
         "actions": {
@@ -54095,7 +53973,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 176,
         "gotos": {},
-        "id": 390
+        "id": 383
       },
       {
         "actions": {
@@ -54179,7 +54057,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 179,
         "gotos": {},
-        "id": 391
+        "id": 384
       },
       {
         "actions": {
@@ -54264,7 +54142,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 191,
         "gotos": {},
-        "id": 392
+        "id": 385
       },
       {
         "actions": {
@@ -54296,7 +54174,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 471,
+          "conditional_expr": 457,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -54311,7 +54189,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 393
+        "id": 386
       },
       {
         "actions": {
@@ -54343,7 +54221,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 472,
+          "conditional_expr": 458,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -54358,7 +54236,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 394
+        "id": 387
       },
       {
         "actions": {
@@ -54373,7 +54251,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 121,
         "gotos": {},
-        "id": 395
+        "id": 388
       },
       {
         "actions": {
@@ -54397,7 +54275,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACKET": "s473",
+          "RBRACKET": "s459",
           "STAR": "s98",
           "STRING_LIT": "s99",
           "TILDE": "s100"
@@ -54410,14 +54288,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 396
+        "id": 389
       },
       {
         "actions": {
-          "RBRACKET": "s474"
+          "RBRACKET": "s460"
         },
         "gotos": {},
-        "id": 397
+        "id": 390
       },
       {
         "actions": {
@@ -54459,7 +54337,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_VOID": "s37",
           "KW_VOLATILE": "s38",
           "LBRACKET": "s180",
-          "LPAREN": "s398",
+          "LPAREN": "s391",
           "RPAREN": "s309",
           "STAR": "s67",
           "TYPEDEF_NAME": "s40"
@@ -54476,14 +54354,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "parameter": 278,
           "parameter_list": 279,
           "parameter_type_list": 311,
-          "pointer": 401,
+          "pointer": 394,
           "storage_class": 49,
           "struct_or_union": 50,
           "struct_or_union_specifier": 51,
           "type_qualifier": 55,
           "type_spec": 56
         },
-        "id": 398
+        "id": 391
       },
       {
         "actions": {
@@ -54492,7 +54370,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 132,
         "gotos": {},
-        "id": 399
+        "id": 392
       },
       {
         "actions": {
@@ -54501,14 +54379,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 131,
         "gotos": {},
-        "id": 400
+        "id": 393
       },
       {
         "actions": {
           "COMMA": "r251",
           "IDENT": "s65",
           "LBRACKET": "s180",
-          "LPAREN": "s398",
+          "LPAREN": "s391",
           "RPAREN": "r251",
           "STAR": "s147"
         },
@@ -54516,11 +54394,11 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "direct_abstract_declarator": 314,
           "direct_declarator": 148
         },
-        "id": 401
+        "id": 394
       },
       {
         "actions": {
-          "ELLIPSIS": "s475",
+          "ELLIPSIS": "s461",
           "KW_ALIGNAS": "s1",
           "KW_ATOMIC": "s3",
           "KW_AUTO": "s4",
@@ -54564,14 +54442,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "decl_spec": 43,
           "decl_specs": 277,
           "enum_specifier": 46,
-          "parameter": 476,
+          "parameter": 462,
           "storage_class": 49,
           "struct_or_union": 50,
           "struct_or_union_specifier": 51,
           "type_qualifier": 55,
           "type_spec": 56
         },
-        "id": 402
+        "id": 395
       },
       {
         "actions": {
@@ -54586,7 +54464,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 125,
         "gotos": {},
-        "id": 403
+        "id": 396
       },
       {
         "actions": {
@@ -54638,7 +54516,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 78,
         "gotos": {},
-        "id": 404
+        "id": 397
       },
       {
         "actions": {
@@ -54647,7 +54525,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 94,
         "gotos": {},
-        "id": 405
+        "id": 398
       },
       {
         "actions": {
@@ -54679,7 +54557,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 477,
+          "conditional_expr": 463,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -54694,7 +54572,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 406
+        "id": 399
       },
       {
         "actions": {
@@ -54707,9 +54585,9 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "declarator": 288,
           "direct_declarator": 70,
           "pointer": 74,
-          "struct_declarator": 478
+          "struct_declarator": 464
         },
-        "id": 407
+        "id": 400
       },
       {
         "actions": {
@@ -54755,14 +54633,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 87,
         "gotos": {},
-        "id": 408
+        "id": 401
       },
       {
         "actions": {
-          "LBRACE": "s416"
+          "LBRACE": "s409"
         },
         "gotos": {},
-        "id": 409
+        "id": 402
       },
       {
         "actions": {
@@ -54806,7 +54684,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 280,
         "gotos": {},
-        "id": 410
+        "id": 403
       },
       {
         "actions": {
@@ -54822,7 +54700,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_DECIMAL128": "s11",
           "KW_DECIMAL32": "s12",
           "KW_DECIMAL64": "s13",
-          "KW_DEFAULT": "s479",
+          "KW_DEFAULT": "s465",
           "KW_DOUBLE": "s14",
           "KW_ENUM": "s15",
           "KW_EXTERN": "s16",
@@ -54854,25 +54732,25 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "decl_spec": 43,
           "decl_specs": 105,
           "enum_specifier": 46,
-          "generic_assoc_list": 480,
-          "generic_association": 481,
+          "generic_assoc_list": 466,
+          "generic_association": 467,
           "storage_class": 49,
           "struct_or_union": 50,
           "struct_or_union_specifier": 51,
-          "type_name": 482,
+          "type_name": 468,
           "type_qualifier": 55,
           "type_spec": 56
         },
-        "id": 411
+        "id": 404
       },
       {
         "actions": {
-          "IDENT": "s483"
+          "IDENT": "s469"
         },
         "gotos": {
-          "offsetof_designator": 484
+          "offsetof_designator": 470
         },
-        "id": 412
+        "id": 405
       },
       {
         "actions": {
@@ -54888,7 +54766,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "GE": "r279",
           "GT": "r279",
           "LAND": "r279",
-          "LBRACE": "s416",
+          "LBRACE": "s409",
           "LE": "r279",
           "LOR": "r279",
           "LSHIFT": "r279",
@@ -54916,7 +54794,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "STAR_EQ": "r279"
         },
         "gotos": {},
-        "id": 413
+        "id": 406
       },
       {
         "actions": {
@@ -54966,11 +54844,11 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "storage_class": 49,
           "struct_or_union": 50,
           "struct_or_union_specifier": 51,
-          "type_name": 485,
+          "type_name": 471,
           "type_qualifier": 55,
           "type_spec": 56
         },
-        "id": 414
+        "id": 407
       },
       {
         "actions": {
@@ -55020,11 +54898,11 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "storage_class": 49,
           "struct_or_union": 50,
           "struct_or_union_specifier": 51,
-          "type_name": 486,
+          "type_name": 472,
           "type_qualifier": 55,
           "type_spec": 56
         },
-        "id": 415
+        "id": 408
       },
       {
         "actions": {
@@ -55051,7 +54929,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACE": "s487",
+          "RBRACE": "s473",
           "STAR": "s98",
           "STRING_LIT": "s99",
           "TILDE": "s100"
@@ -55070,7 +54948,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
           "initializer": 365,
-          "initializer_list": 488,
+          "initializer_list": 474,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
           "multiplicative_expr": 111,
@@ -55082,7 +54960,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 416
+        "id": 409
       },
       {
         "actions": {
@@ -55126,7 +55004,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 248,
         "gotos": {},
-        "id": 417
+        "id": 410
       },
       {
         "actions": {
@@ -55158,7 +55036,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 489,
+          "conditional_expr": 475,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -55173,7 +55051,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 418
+        "id": 411
       },
       {
         "actions": {
@@ -55205,7 +55083,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 490,
+          "conditional_expr": 476,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -55220,7 +55098,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 419
+        "id": 412
       },
       {
         "actions": {
@@ -55232,7 +55110,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 263,
         "gotos": {},
-        "id": 420
+        "id": 413
       },
       {
         "actions": {
@@ -55256,7 +55134,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACKET": "s491",
+          "RBRACKET": "s477",
           "STAR": "s98",
           "STRING_LIT": "s99",
           "TILDE": "s100"
@@ -55269,14 +55147,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 421
+        "id": 414
       },
       {
         "actions": {
-          "RBRACKET": "s492"
+          "RBRACKET": "s478"
         },
         "gotos": {},
-        "id": 422
+        "id": 415
       },
       {
         "actions": {
@@ -55288,7 +55166,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 254,
         "gotos": {},
-        "id": 423
+        "id": 416
       },
       {
         "actions": {
@@ -55300,7 +55178,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 267,
         "gotos": {},
-        "id": 424
+        "id": 417
       },
       {
         "actions": {
@@ -55335,9 +55213,9 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         "gotos": {
           "type_qualifier": 137,
           "type_qualifier_list": 138,
-          "type_qualifier_list_opt": 493
+          "type_qualifier_list_opt": 479
         },
-        "id": 425
+        "id": 418
       },
       {
         "actions": {
@@ -55359,7 +55237,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_REAL": "r114",
           "KW_RESTRICT": "s25",
           "KW_SIZEOF": "r114",
-          "KW_STATIC": "s494",
+          "KW_STATIC": "s480",
           "KW_TYPES_COMPATIBLE_P": "r114",
           "KW_VA_ARG": "r114",
           "KW_VOLATILE": "s38",
@@ -55374,7 +55252,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         "gotos": {
           "type_qualifier": 234
         },
-        "id": 426
+        "id": 419
       },
       {
         "actions": {
@@ -55398,8 +55276,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACKET": "s495",
-          "STAR": "s496",
+          "RBRACKET": "s481",
+          "STAR": "s482",
           "STRING_LIT": "s99",
           "TILDE": "s100"
         },
@@ -55407,7 +55285,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 497,
+          "conditional_expr": 483,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -55422,7 +55300,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 427
+        "id": 420
       },
       {
         "actions": {
@@ -55434,14 +55312,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 261,
         "gotos": {},
-        "id": 428
+        "id": 421
       },
       {
         "actions": {
-          "RPAREN": "s498"
+          "RPAREN": "s484"
         },
         "gotos": {},
-        "id": 429
+        "id": 422
       },
       {
         "actions": {
@@ -55473,7 +55351,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 499,
+          "conditional_expr": 485,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -55488,7 +55366,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 430
+        "id": 423
       },
       {
         "actions": {
@@ -55538,7 +55416,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 284,
         "gotos": {},
-        "id": 431
+        "id": 424
       },
       {
         "actions": {
@@ -55569,7 +55447,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         "gotos": {
           "additive_expr": 101,
           "and_expr": 102,
-          "assignment_expr": 500,
+          "assignment_expr": 486,
           "cast_expr": 103,
           "conditional_expr": 132,
           "equality_expr": 106,
@@ -55586,7 +55464,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 432
+        "id": 425
       },
       {
         "actions": {
@@ -55636,30 +55514,30 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 285,
         "gotos": {},
-        "id": 433
+        "id": 426
       },
       {
         "actions": {
           "COLON": "r25",
-          "IDENT": "s501",
-          "LBRACKET": "s502",
+          "IDENT": "s487",
+          "LBRACKET": "s488",
           "RPAREN": "r25",
           "STRING_LIT": "r32"
         },
         "gotos": {
-          "asm_operand": 503,
-          "asm_operand_list": 504,
-          "asm_operand_list_opt": 505,
-          "asm_operand_name_opt": 506
+          "asm_operand": 489,
+          "asm_operand_list": 490,
+          "asm_operand_list_opt": 491,
+          "asm_operand_name_opt": 492
         },
-        "id": 434
+        "id": 427
       },
       {
         "actions": {
-          "SEMI": "s507"
+          "SEMI": "s493"
         },
         "gotos": {},
-        "id": 435
+        "id": 428
       },
       {
         "actions": {
@@ -55668,7 +55546,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 22,
         "gotos": {},
-        "id": 436
+        "id": 429
       },
       {
         "actions": {
@@ -55720,14 +55598,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 96,
         "gotos": {},
-        "id": 437
+        "id": 430
       },
       {
         "actions": {
-          "SEMI": "s508"
+          "SEMI": "s494"
         },
         "gotos": {},
-        "id": 438
+        "id": 431
       },
       {
         "actions": {
@@ -55737,15 +55615,15 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 147,
         "gotos": {},
-        "id": 439
+        "id": 432
       },
       {
         "actions": {
-          "ELLIPSIS": "s509",
-          "RBRACKET": "s510"
+          "ELLIPSIS": "s495",
+          "RBRACKET": "s496"
         },
         "gotos": {},
-        "id": 440
+        "id": 433
       },
       {
         "actions": {
@@ -55754,7 +55632,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 141,
         "gotos": {},
-        "id": 441
+        "id": 434
       },
       {
         "actions": {
@@ -55785,7 +55663,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 142,
         "gotos": {},
-        "id": 442
+        "id": 435
       },
       {
         "actions": {
@@ -55795,7 +55673,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 144,
         "gotos": {},
-        "id": 443
+        "id": 436
       },
       {
         "actions": {
@@ -55822,7 +55700,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACE": "s511",
+          "RBRACE": "s497",
           "STAR": "s98",
           "STRING_LIT": "s99",
           "TILDE": "s100"
@@ -55833,7 +55711,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "assignment_expr": 236,
           "cast_expr": 103,
           "conditional_expr": 132,
-          "designated_initializer": 512,
+          "designated_initializer": 498,
           "designation": 362,
           "designator": 363,
           "designator_list": 364,
@@ -55852,7 +55730,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 444
+        "id": 437
       },
       {
         "actions": {
@@ -55862,7 +55740,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 135,
         "gotos": {},
-        "id": 445
+        "id": 438
       },
       {
         "actions": {
@@ -55924,7 +55802,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "type_qualifier": 55,
           "type_spec": 56
         },
-        "id": 446
+        "id": 439
       },
       {
         "actions": {
@@ -56009,7 +55887,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 157,
         "gotos": {},
-        "id": 447
+        "id": 440
       },
       {
         "actions": {
@@ -56094,7 +55972,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 156,
         "gotos": {},
-        "id": 448
+        "id": 441
       },
       {
         "actions": {
@@ -56178,7 +56056,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 163,
         "gotos": {},
-        "id": 449
+        "id": 442
       },
       {
         "actions": {
@@ -56236,7 +56114,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 513,
+          "matched_stmt": 499,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
@@ -56248,10 +56126,10 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "unary_expr": 134,
           "unmatched_if": 269,
           "unmatched_iteration_stmt": 270,
-          "unmatched_stmt": 514,
+          "unmatched_stmt": 500,
           "unmatched_switch_stmt": 272
         },
-        "id": 450
+        "id": 443
       },
       {
         "actions": {
@@ -56336,7 +56214,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 159,
         "gotos": {},
-        "id": 451
+        "id": 444
       },
       {
         "actions": {
@@ -56420,452 +56298,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 165,
         "gotos": {},
-        "id": 452
+        "id": 445
       },
       {
         "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s372",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNAS": "s1",
-          "KW_ALIGNOF": "s86",
-          "KW_ATOMIC": "s3",
-          "KW_AUTO": "s4",
-          "KW_BITINT": "s5",
-          "KW_BOOL": "s6",
-          "KW_BREAK": "s239",
-          "KW_CASE": "s373",
-          "KW_CHAR": "s7",
-          "KW_COMPLEX": "s8",
-          "KW_CONST": "s9",
-          "KW_CONSTEXPR": "s10",
-          "KW_CONTINUE": "s241",
-          "KW_DECIMAL128": "s11",
-          "KW_DECIMAL32": "s12",
-          "KW_DECIMAL64": "s13",
-          "KW_DEFAULT": "s374",
-          "KW_DO": "s243",
-          "KW_DOUBLE": "s14",
-          "KW_ENUM": "s15",
-          "KW_EXTERN": "s16",
-          "KW_FLOAT": "s17",
-          "KW_FOR": "s375",
-          "KW_GENERIC": "s87",
-          "KW_GOTO": "s245",
-          "KW_IF": "s376",
-          "KW_IMAG": "s88",
-          "KW_IMAGINARY": "s18",
-          "KW_INLINE": "s19",
-          "KW_INT": "s20",
-          "KW_INT128": "s21",
-          "KW_LONG": "s22",
-          "KW_NORETURN": "s23",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_REGISTER": "s24",
-          "KW_RESTRICT": "s25",
-          "KW_RETURN": "s248",
-          "KW_SHORT": "s26",
-          "KW_SIGNED": "s27",
-          "KW_SIZEOF": "s92",
-          "KW_STATIC": "s28",
-          "KW_STRUCT": "s30",
-          "KW_SWITCH": "s377",
-          "KW_THREAD_LOCAL": "s31",
-          "KW_TYPEDEF": "s32",
-          "KW_TYPEOF": "s33",
-          "KW_TYPEOF_UNQUAL": "s34",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_UNION": "s35",
-          "KW_UNSIGNED": "s36",
-          "KW_VA_ARG": "s94",
-          "KW_VOID": "s37",
-          "KW_VOLATILE": "s38",
-          "KW_WHILE": "s378",
-          "LBRACE": "s141",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100",
-          "TYPEDEF_NAME": "s40"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "alignment_specifier": 41,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "compound_stmt": 256,
-          "conditional_expr": 132,
-          "decl_spec": 43,
-          "decl_specs": 446,
-          "declaration": 447,
-          "enum_specifier": 46,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 259,
-          "inclusive_or_expr": 108,
-          "jump_stmt": 261,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "matched_if": 263,
-          "matched_iteration_stmt": 264,
-          "matched_stmt": 448,
-          "matched_switch_stmt": 266,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "storage_class": 49,
-          "string_literal": 116,
-          "string_piece": 117,
-          "struct_or_union": 50,
-          "struct_or_union_specifier": 51,
-          "type_qualifier": 55,
-          "type_spec": 56,
-          "unary_expr": 134
-        },
-        "id": 453
-      },
-      {
-        "actions": {
-          "COLON": "s515"
+          "LPAREN": "s501"
         },
         "gotos": {},
-        "id": 454
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s372",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_BREAK": "s239",
-          "KW_CASE": "s373",
-          "KW_CONTINUE": "s241",
-          "KW_DEFAULT": "s374",
-          "KW_DO": "s243",
-          "KW_FOR": "s375",
-          "KW_GENERIC": "s87",
-          "KW_GOTO": "s245",
-          "KW_IF": "s376",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_RETURN": "s248",
-          "KW_SIZEOF": "s92",
-          "KW_SWITCH": "s377",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "KW_WHILE": "s378",
-          "LBRACE": "s141",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "compound_stmt": 256,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 259,
-          "inclusive_or_expr": 108,
-          "jump_stmt": 261,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "matched_if": 263,
-          "matched_iteration_stmt": 264,
-          "matched_stmt": 451,
-          "matched_switch_stmt": 266,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 455
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s83",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNAS": "s1",
-          "KW_ALIGNOF": "s86",
-          "KW_ATOMIC": "s3",
-          "KW_AUTO": "s4",
-          "KW_BITINT": "s5",
-          "KW_BOOL": "s6",
-          "KW_CHAR": "s7",
-          "KW_COMPLEX": "s8",
-          "KW_CONST": "s9",
-          "KW_CONSTEXPR": "s10",
-          "KW_DECIMAL128": "s11",
-          "KW_DECIMAL32": "s12",
-          "KW_DECIMAL64": "s13",
-          "KW_DOUBLE": "s14",
-          "KW_ENUM": "s15",
-          "KW_EXTERN": "s16",
-          "KW_FLOAT": "s17",
-          "KW_GENERIC": "s87",
-          "KW_IMAG": "s88",
-          "KW_IMAGINARY": "s18",
-          "KW_INLINE": "s19",
-          "KW_INT": "s20",
-          "KW_INT128": "s21",
-          "KW_LONG": "s22",
-          "KW_NORETURN": "s23",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_REGISTER": "s24",
-          "KW_RESTRICT": "s25",
-          "KW_SHORT": "s26",
-          "KW_SIGNED": "s27",
-          "KW_SIZEOF": "s92",
-          "KW_STATIC": "s28",
-          "KW_STRUCT": "s30",
-          "KW_THREAD_LOCAL": "s31",
-          "KW_TYPEDEF": "s32",
-          "KW_TYPEOF": "s33",
-          "KW_TYPEOF_UNQUAL": "s34",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_UNION": "s35",
-          "KW_UNSIGNED": "s36",
-          "KW_VA_ARG": "s94",
-          "KW_VOID": "s37",
-          "KW_VOLATILE": "s38",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100",
-          "TYPEDEF_NAME": "s40"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "alignment_specifier": 41,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "conditional_expr": 132,
-          "decl_spec": 43,
-          "decl_specs": 446,
-          "declaration": 461,
-          "enum_specifier": 46,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 462,
-          "for_init": 516,
-          "inclusive_or_expr": 108,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "storage_class": 49,
-          "string_literal": 116,
-          "string_piece": 117,
-          "struct_or_union": 50,
-          "struct_or_union_specifier": 51,
-          "type_qualifier": 55,
-          "type_spec": 56,
-          "unary_expr": 134
-        },
-        "id": 456
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s83",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_GENERIC": "s87",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_SIZEOF": "s92",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 517,
-          "inclusive_or_expr": 108,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 457
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s83",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_GENERIC": "s87",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_SIZEOF": "s92",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 518,
-          "inclusive_or_expr": 108,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 458
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s83",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_GENERIC": "s87",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_SIZEOF": "s92",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 519,
-          "inclusive_or_expr": 108,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 459
-      },
-      {
-        "actions": {
-          "LPAREN": "s520"
-        },
-        "gotos": {},
-        "id": 460
+        "id": 446
       },
       {
         "actions": {
@@ -56896,7 +56336,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 192,
         "gotos": {},
-        "id": 461
+        "id": 447
       },
       {
         "actions": {
@@ -56927,7 +56367,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 193,
         "gotos": {},
-        "id": 462
+        "id": 448
       },
       {
         "actions": {
@@ -56964,8 +56404,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 521,
-          "for_cond_opt": 522,
+          "expr": 502,
+          "for_cond_opt": 503,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -56978,7 +56418,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 463
+        "id": 449
       },
       {
         "actions": {
@@ -57063,24 +56503,24 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 198,
         "gotos": {},
-        "id": 464
+        "id": 450
       },
       {
         "actions": {
           "COMMA": "s219",
-          "RPAREN": "s523"
+          "RPAREN": "s504"
         },
         "gotos": {},
-        "id": 465
+        "id": 451
       },
       {
         "actions": {
-          "IDENT": "s383"
+          "IDENT": "s376"
         },
         "gotos": {
-          "label_decl_name": 524
+          "label_decl_name": 505
         },
-        "id": 466
+        "id": 452
       },
       {
         "actions": {
@@ -57164,7 +56604,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 186,
         "gotos": {},
-        "id": 467
+        "id": 453
       },
       {
         "actions": {
@@ -57249,37 +56689,37 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 202,
         "gotos": {},
-        "id": 468
+        "id": 454
       },
       {
         "actions": {
           "COMMA": "s219",
-          "RPAREN": "s525"
+          "RPAREN": "s506"
         },
         "gotos": {},
-        "id": 469
+        "id": 455
       },
       {
         "actions": {
           "COMMA": "s219",
-          "RPAREN": "s526"
+          "RPAREN": "s507"
         },
         "gotos": {},
-        "id": 470
+        "id": 456
       },
       {
         "actions": {
-          "RBRACKET": "s527"
+          "RBRACKET": "s508"
         },
         "gotos": {},
-        "id": 471
+        "id": 457
       },
       {
         "actions": {
-          "RBRACKET": "s528"
+          "RBRACKET": "s509"
         },
         "gotos": {},
-        "id": 472
+        "id": 458
       },
       {
         "actions": {
@@ -57294,7 +56734,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 122,
         "gotos": {},
-        "id": 473
+        "id": 459
       },
       {
         "actions": {
@@ -57309,7 +56749,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 120,
         "gotos": {},
-        "id": 474
+        "id": 460
       },
       {
         "actions": {
@@ -57317,7 +56757,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 128,
         "gotos": {},
-        "id": 475
+        "id": 461
       },
       {
         "actions": {
@@ -57326,7 +56766,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 130,
         "gotos": {},
-        "id": 476
+        "id": 462
       },
       {
         "actions": {
@@ -57335,7 +56775,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 93,
         "gotos": {},
-        "id": 477
+        "id": 463
       },
       {
         "actions": {
@@ -57344,22 +56784,22 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 91,
         "gotos": {},
-        "id": 478
+        "id": 464
       },
       {
         "actions": {
-          "COLON": "s529"
+          "COLON": "s510"
         },
         "gotos": {},
-        "id": 479
+        "id": 465
       },
       {
         "actions": {
-          "COMMA": "s530",
-          "RPAREN": "s531"
+          "COMMA": "s511",
+          "RPAREN": "s512"
         },
         "gotos": {},
-        "id": 480
+        "id": 466
       },
       {
         "actions": {
@@ -57368,14 +56808,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 312,
         "gotos": {},
-        "id": 481
+        "id": 467
       },
       {
         "actions": {
-          "COLON": "s532"
+          "COLON": "s513"
         },
         "gotos": {},
-        "id": 482
+        "id": 468
       },
       {
         "actions": {
@@ -57385,30 +56825,30 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 306,
         "gotos": {},
-        "id": 483
+        "id": 469
       },
       {
         "actions": {
-          "DOT": "s533",
-          "LBRACKET": "s534",
-          "RPAREN": "s535"
+          "DOT": "s514",
+          "LBRACKET": "s515",
+          "RPAREN": "s516"
         },
         "gotos": {},
-        "id": 484
+        "id": 470
       },
       {
         "actions": {
-          "RPAREN": "s536"
+          "RPAREN": "s517"
         },
         "gotos": {},
-        "id": 485
+        "id": 471
       },
       {
         "actions": {
-          "RPAREN": "s537"
+          "RPAREN": "s518"
         },
         "gotos": {},
-        "id": 486
+        "id": 472
       },
       {
         "actions": {
@@ -57458,29 +56898,29 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 293,
         "gotos": {},
-        "id": 487
+        "id": 473
       },
       {
         "actions": {
-          "COMMA": "s538",
-          "RBRACE": "s539"
+          "COMMA": "s519",
+          "RBRACE": "s520"
         },
         "gotos": {},
-        "id": 488
+        "id": 474
       },
       {
         "actions": {
-          "RBRACKET": "s540"
+          "RBRACKET": "s521"
         },
         "gotos": {},
-        "id": 489
+        "id": 475
       },
       {
         "actions": {
-          "RBRACKET": "s541"
+          "RBRACKET": "s522"
         },
         "gotos": {},
-        "id": 490
+        "id": 476
       },
       {
         "actions": {
@@ -57492,7 +56932,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 264,
         "gotos": {},
-        "id": 491
+        "id": 477
       },
       {
         "actions": {
@@ -57504,7 +56944,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 262,
         "gotos": {},
-        "id": 492
+        "id": 478
       },
       {
         "actions": {
@@ -57536,7 +56976,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 542,
+          "conditional_expr": 523,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -57551,7 +56991,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 493
+        "id": 479
       },
       {
         "actions": {
@@ -57583,7 +57023,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 543,
+          "conditional_expr": 524,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -57598,7 +57038,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 494
+        "id": 480
       },
       {
         "actions": {
@@ -57610,7 +57050,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 256,
         "gotos": {},
-        "id": 495
+        "id": 481
       },
       {
         "actions": {
@@ -57634,7 +57074,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACKET": "s544",
+          "RBRACKET": "s525",
           "STAR": "s98",
           "STRING_LIT": "s99",
           "TILDE": "s100"
@@ -57647,14 +57087,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 496
+        "id": 482
       },
       {
         "actions": {
-          "RBRACKET": "s545"
+          "RBRACKET": "s526"
         },
         "gotos": {},
-        "id": 497
+        "id": 483
       },
       {
         "actions": {
@@ -57666,7 +57106,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 260,
         "gotos": {},
-        "id": 498
+        "id": 484
       },
       {
         "actions": {
@@ -57680,7 +57120,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 218,
         "gotos": {},
-        "id": 499
+        "id": 485
       },
       {
         "actions": {
@@ -57689,7 +57129,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 317,
         "gotos": {},
-        "id": 500
+        "id": 486
       },
       {
         "actions": {
@@ -57699,14 +57139,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 30,
         "gotos": {},
-        "id": 501
+        "id": 487
       },
       {
         "actions": {
-          "IDENT": "s546"
+          "IDENT": "s527"
         },
         "gotos": {},
-        "id": 502
+        "id": 488
       },
       {
         "actions": {
@@ -57716,16 +57156,16 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 26,
         "gotos": {},
-        "id": 503
+        "id": 489
       },
       {
         "actions": {
           "COLON": "r24",
-          "COMMA": "s547",
+          "COMMA": "s528",
           "RPAREN": "r24"
         },
         "gotos": {},
-        "id": 504
+        "id": 490
       },
       {
         "actions": {
@@ -57734,14 +57174,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 23,
         "gotos": {},
-        "id": 505
+        "id": 491
       },
       {
         "actions": {
-          "STRING_LIT": "s548"
+          "STRING_LIT": "s529"
         },
         "gotos": {},
-        "id": 506
+        "id": 492
       },
       {
         "actions": {
@@ -57826,7 +57266,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 12,
         "gotos": {},
-        "id": 507
+        "id": 493
       },
       {
         "actions": {
@@ -57911,7 +57351,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 11,
         "gotos": {},
-        "id": 508
+        "id": 494
       },
       {
         "actions": {
@@ -57943,7 +57383,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "additive_expr": 101,
           "and_expr": 102,
           "cast_expr": 103,
-          "conditional_expr": 549,
+          "conditional_expr": 530,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
           "inclusive_or_expr": 108,
@@ -57958,7 +57398,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 119
         },
-        "id": 509
+        "id": 495
       },
       {
         "actions": {
@@ -57968,7 +57408,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 145,
         "gotos": {},
-        "id": 510
+        "id": 496
       },
       {
         "actions": {
@@ -57978,7 +57418,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 136,
         "gotos": {},
-        "id": 511
+        "id": 497
       },
       {
         "actions": {
@@ -57987,7 +57427,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 139,
         "gotos": {},
-        "id": 512
+        "id": 498
       },
       {
         "actions": {
@@ -58072,7 +57512,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 158,
         "gotos": {},
-        "id": 513
+        "id": 499
       },
       {
         "actions": {
@@ -58156,151 +57596,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 164,
         "gotos": {},
-        "id": 514
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s372",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_BREAK": "s239",
-          "KW_CASE": "s373",
-          "KW_CONTINUE": "s241",
-          "KW_DEFAULT": "s374",
-          "KW_DO": "s243",
-          "KW_FOR": "s375",
-          "KW_GENERIC": "s87",
-          "KW_GOTO": "s245",
-          "KW_IF": "s376",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_RETURN": "s248",
-          "KW_SIZEOF": "s92",
-          "KW_SWITCH": "s377",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "KW_WHILE": "s378",
-          "LBRACE": "s141",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "compound_stmt": 256,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 259,
-          "inclusive_or_expr": 108,
-          "jump_stmt": 261,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "matched_if": 263,
-          "matched_iteration_stmt": 264,
-          "matched_stmt": 513,
-          "matched_switch_stmt": 266,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 515
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s83",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_GENERIC": "s87",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_SIZEOF": "s92",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "r195",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 521,
-          "for_cond_opt": 550,
-          "inclusive_or_expr": 108,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 516
-      },
-      {
-        "actions": {
-          "COMMA": "s219",
-          "RPAREN": "s551"
-        },
-        "gotos": {},
-        "id": 517
-      },
-      {
-        "actions": {
-          "COMMA": "s219",
-          "RPAREN": "s552"
-        },
-        "gotos": {},
-        "id": 518
-      },
-      {
-        "actions": {
-          "COMMA": "s219",
-          "RPAREN": "s553"
-        },
-        "gotos": {},
-        "id": 519
+        "id": 500
       },
       {
         "actions": {
@@ -58336,7 +57632,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 554,
+          "expr": 531,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -58349,7 +57645,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 520
+        "id": 501
       },
       {
         "actions": {
@@ -58357,14 +57653,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "SEMI": "r194"
         },
         "gotos": {},
-        "id": 521
+        "id": 502
       },
       {
         "actions": {
-          "SEMI": "s555"
+          "SEMI": "s532"
         },
         "gotos": {},
-        "id": 522
+        "id": 503
       },
       {
         "actions": {
@@ -58422,14 +57718,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 556,
+          "matched_stmt": 533,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
           "primary_expr": 113,
           "relational_expr": 114,
           "shift_expr": 115,
-          "stmt": 557,
+          "stmt": 534,
           "string_literal": 116,
           "string_piece": 117,
           "unary_expr": 134,
@@ -58438,7 +57734,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "unmatched_stmt": 271,
           "unmatched_switch_stmt": 272
         },
-        "id": 523
+        "id": 504
       },
       {
         "actions": {
@@ -58447,7 +57743,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 188,
         "gotos": {},
-        "id": 524
+        "id": 505
       },
       {
         "actions": {
@@ -58505,7 +57801,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 558,
+          "matched_stmt": 535,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
@@ -58517,10 +57813,10 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "unary_expr": 134,
           "unmatched_if": 269,
           "unmatched_iteration_stmt": 270,
-          "unmatched_stmt": 559,
+          "unmatched_stmt": 536,
           "unmatched_switch_stmt": 272
         },
-        "id": 525
+        "id": 506
       },
       {
         "actions": {
@@ -58578,7 +57874,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 560,
+          "matched_stmt": 537,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
@@ -58590,10 +57886,10 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "unary_expr": 134,
           "unmatched_if": 269,
           "unmatched_iteration_stmt": 270,
-          "unmatched_stmt": 561,
+          "unmatched_stmt": 538,
           "unmatched_switch_stmt": 272
         },
-        "id": 526
+        "id": 507
       },
       {
         "actions": {
@@ -58608,7 +57904,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 123,
         "gotos": {},
-        "id": 527
+        "id": 508
       },
       {
         "actions": {
@@ -58623,7 +57919,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 124,
         "gotos": {},
-        "id": 528
+        "id": 509
       },
       {
         "actions": {
@@ -58654,7 +57950,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         "gotos": {
           "additive_expr": 101,
           "and_expr": 102,
-          "assignment_expr": 562,
+          "assignment_expr": 539,
           "cast_expr": 103,
           "conditional_expr": 132,
           "equality_expr": 106,
@@ -58671,7 +57967,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 529
+        "id": 510
       },
       {
         "actions": {
@@ -58687,7 +57983,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_DECIMAL128": "s11",
           "KW_DECIMAL32": "s12",
           "KW_DECIMAL64": "s13",
-          "KW_DEFAULT": "s479",
+          "KW_DEFAULT": "s465",
           "KW_DOUBLE": "s14",
           "KW_ENUM": "s15",
           "KW_EXTERN": "s16",
@@ -58719,15 +58015,15 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "decl_spec": 43,
           "decl_specs": 105,
           "enum_specifier": 46,
-          "generic_association": 563,
+          "generic_association": 540,
           "storage_class": 49,
           "struct_or_union": 50,
           "struct_or_union_specifier": 51,
-          "type_name": 482,
+          "type_name": 468,
           "type_qualifier": 55,
           "type_spec": 56
         },
-        "id": 530
+        "id": 511
       },
       {
         "actions": {
@@ -58777,7 +58073,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 302,
         "gotos": {},
-        "id": 531
+        "id": 512
       },
       {
         "actions": {
@@ -58808,7 +58104,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         "gotos": {
           "additive_expr": 101,
           "and_expr": 102,
-          "assignment_expr": 564,
+          "assignment_expr": 541,
           "cast_expr": 103,
           "conditional_expr": 132,
           "equality_expr": 106,
@@ -58825,14 +58121,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 532
+        "id": 513
       },
       {
         "actions": {
-          "IDENT": "s565"
+          "IDENT": "s542"
         },
         "gotos": {},
-        "id": 533
+        "id": 514
       },
       {
         "actions": {
@@ -58868,7 +58164,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 566,
+          "expr": 543,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -58881,7 +58177,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 534
+        "id": 515
       },
       {
         "actions": {
@@ -58931,7 +58227,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 304,
         "gotos": {},
-        "id": 535
+        "id": 516
       },
       {
         "actions": {
@@ -58981,7 +58277,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 305,
         "gotos": {},
-        "id": 536
+        "id": 517
       },
       {
         "actions": {
@@ -59031,7 +58327,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 303,
         "gotos": {},
-        "id": 537
+        "id": 518
       },
       {
         "actions": {
@@ -59058,7 +58354,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "LPAREN": "s95",
           "MINUS": "s96",
           "PLUS": "s97",
-          "RBRACE": "s567",
+          "RBRACE": "s544",
           "STAR": "s98",
           "STRING_LIT": "s99",
           "TILDE": "s100"
@@ -59069,7 +58365,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "assignment_expr": 236,
           "cast_expr": 103,
           "conditional_expr": 132,
-          "designated_initializer": 512,
+          "designated_initializer": 498,
           "designation": 362,
           "designator": 363,
           "designator_list": 364,
@@ -59088,7 +58384,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 538
+        "id": 519
       },
       {
         "actions": {
@@ -59138,7 +58434,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 291,
         "gotos": {},
-        "id": 539
+        "id": 520
       },
       {
         "actions": {
@@ -59150,7 +58446,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 265,
         "gotos": {},
-        "id": 540
+        "id": 521
       },
       {
         "actions": {
@@ -59162,21 +58458,21 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 266,
         "gotos": {},
-        "id": 541
+        "id": 522
       },
       {
         "actions": {
-          "RBRACKET": "s568"
+          "RBRACKET": "s545"
         },
         "gotos": {},
-        "id": 542
+        "id": 523
       },
       {
         "actions": {
-          "RBRACKET": "s569"
+          "RBRACKET": "s546"
         },
         "gotos": {},
-        "id": 543
+        "id": 524
       },
       {
         "actions": {
@@ -59188,7 +58484,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 257,
         "gotos": {},
-        "id": 544
+        "id": 525
       },
       {
         "actions": {
@@ -59200,265 +58496,51 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 255,
         "gotos": {},
-        "id": 545
+        "id": 526
       },
       {
         "actions": {
-          "RBRACKET": "s570"
+          "RBRACKET": "s547"
         },
         "gotos": {},
-        "id": 546
+        "id": 527
       },
       {
         "actions": {
-          "IDENT": "s501",
-          "LBRACKET": "s502",
+          "IDENT": "s487",
+          "LBRACKET": "s488",
           "STRING_LIT": "r32"
         },
         "gotos": {
-          "asm_operand": 571,
-          "asm_operand_name_opt": 506
+          "asm_operand": 548,
+          "asm_operand_name_opt": 492
         },
-        "id": 547
+        "id": 528
       },
       {
         "actions": {
           "COLON": "r29",
           "COMMA": "r29",
-          "LPAREN": "s572",
+          "LPAREN": "s549",
           "RPAREN": "r29"
         },
         "gotos": {},
-        "id": 548
+        "id": 529
       },
       {
         "actions": {
-          "RBRACKET": "s573"
+          "RBRACKET": "s550"
         },
         "gotos": {},
-        "id": 549
-      },
-      {
-        "actions": {
-          "SEMI": "s574"
-        },
-        "gotos": {},
-        "id": 550
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s372",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_BREAK": "s239",
-          "KW_CASE": "s373",
-          "KW_CONTINUE": "s241",
-          "KW_DEFAULT": "s374",
-          "KW_DO": "s243",
-          "KW_FOR": "s375",
-          "KW_GENERIC": "s87",
-          "KW_GOTO": "s245",
-          "KW_IF": "s376",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_RETURN": "s248",
-          "KW_SIZEOF": "s92",
-          "KW_SWITCH": "s377",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "KW_WHILE": "s378",
-          "LBRACE": "s141",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "compound_stmt": 256,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 259,
-          "inclusive_or_expr": 108,
-          "jump_stmt": 261,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "matched_if": 263,
-          "matched_iteration_stmt": 264,
-          "matched_stmt": 575,
-          "matched_switch_stmt": 266,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 551
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s372",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_BREAK": "s239",
-          "KW_CASE": "s373",
-          "KW_CONTINUE": "s241",
-          "KW_DEFAULT": "s374",
-          "KW_DO": "s243",
-          "KW_FOR": "s375",
-          "KW_GENERIC": "s87",
-          "KW_GOTO": "s245",
-          "KW_IF": "s376",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_RETURN": "s248",
-          "KW_SIZEOF": "s92",
-          "KW_SWITCH": "s377",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "KW_WHILE": "s378",
-          "LBRACE": "s141",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "compound_stmt": 256,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 259,
-          "inclusive_or_expr": 108,
-          "jump_stmt": 261,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "matched_if": 263,
-          "matched_iteration_stmt": 264,
-          "matched_stmt": 558,
-          "matched_switch_stmt": 266,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 552
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s372",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_BREAK": "s239",
-          "KW_CASE": "s373",
-          "KW_CONTINUE": "s241",
-          "KW_DEFAULT": "s374",
-          "KW_DO": "s243",
-          "KW_FOR": "s375",
-          "KW_GENERIC": "s87",
-          "KW_GOTO": "s245",
-          "KW_IF": "s376",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_RETURN": "s248",
-          "KW_SIZEOF": "s92",
-          "KW_SWITCH": "s377",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "KW_WHILE": "s378",
-          "LBRACE": "s141",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "compound_stmt": 256,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 259,
-          "inclusive_or_expr": 108,
-          "jump_stmt": 261,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "matched_if": 263,
-          "matched_iteration_stmt": 264,
-          "matched_stmt": 560,
-          "matched_switch_stmt": 266,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 553
+        "id": 530
       },
       {
         "actions": {
           "COMMA": "s219",
-          "RPAREN": "s576"
+          "RPAREN": "s551"
         },
         "gotos": {},
-        "id": 554
+        "id": 531
       },
       {
         "actions": {
@@ -59495,8 +58577,8 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 577,
-          "for_step_opt": 578,
+          "expr": 552,
+          "for_step_opt": 553,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -59509,7 +58591,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 555
+        "id": 532
       },
       {
         "actions": {
@@ -59541,7 +58623,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "KW_DEFAULT": "r148",
           "KW_DO": "r148",
           "KW_DOUBLE": "r148",
-          "KW_ELSE": "s579",
+          "KW_ELSE": "s554",
           "KW_ENUM": "r148",
           "KW_EXTERN": "r148",
           "KW_FLOAT": "r148",
@@ -59593,7 +58675,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "TYPEDEF_NAME": "r148"
         },
         "gotos": {},
-        "id": 556
+        "id": 533
       },
       {
         "actions": {
@@ -59677,7 +58759,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 167,
         "gotos": {},
-        "id": 557
+        "id": 534
       },
       {
         "actions": {
@@ -59762,7 +58844,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 174,
         "gotos": {},
-        "id": 558
+        "id": 535
       },
       {
         "actions": {
@@ -59846,7 +58928,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 175,
         "gotos": {},
-        "id": 559
+        "id": 536
       },
       {
         "actions": {
@@ -59931,7 +59013,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 169,
         "gotos": {},
-        "id": 560
+        "id": 537
       },
       {
         "actions": {
@@ -60015,7 +59097,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 172,
         "gotos": {},
-        "id": 561
+        "id": 538
       },
       {
         "actions": {
@@ -60024,7 +59106,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 315,
         "gotos": {},
-        "id": 562
+        "id": 539
       },
       {
         "actions": {
@@ -60033,7 +59115,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 313,
         "gotos": {},
-        "id": 563
+        "id": 540
       },
       {
         "actions": {
@@ -60042,7 +59124,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 314,
         "gotos": {},
-        "id": 564
+        "id": 541
       },
       {
         "actions": {
@@ -60052,15 +59134,15 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 307,
         "gotos": {},
-        "id": 565
+        "id": 542
       },
       {
         "actions": {
           "COMMA": "s219",
-          "RBRACKET": "s580"
+          "RBRACKET": "s555"
         },
         "gotos": {},
-        "id": 566
+        "id": 543
       },
       {
         "actions": {
@@ -60110,7 +59192,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 292,
         "gotos": {},
-        "id": 567
+        "id": 544
       },
       {
         "actions": {
@@ -60122,7 +59204,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 258,
         "gotos": {},
-        "id": 568
+        "id": 545
       },
       {
         "actions": {
@@ -60134,7 +59216,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 259,
         "gotos": {},
-        "id": 569
+        "id": 546
       },
       {
         "actions": {
@@ -60142,7 +59224,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 31,
         "gotos": {},
-        "id": 570
+        "id": 547
       },
       {
         "actions": {
@@ -60152,7 +59234,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 27,
         "gotos": {},
-        "id": 571
+        "id": 548
       },
       {
         "actions": {
@@ -60188,7 +59270,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "conditional_expr": 132,
           "equality_expr": 106,
           "exclusive_or_expr": 107,
-          "expr": 581,
+          "expr": 556,
           "inclusive_or_expr": 108,
           "logical_and_expr": 109,
           "logical_or_expr": 110,
@@ -60201,7 +59283,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "string_piece": 117,
           "unary_expr": 134
         },
-        "id": 572
+        "id": 549
       },
       {
         "actions": {
@@ -60211,72 +59293,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 146,
         "gotos": {},
-        "id": 573
+        "id": 550
       },
       {
         "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s83",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_GENERIC": "s87",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_SIZEOF": "s92",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "RPAREN": "r197",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 577,
-          "for_step_opt": 582,
-          "inclusive_or_expr": 108,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 574
-      },
-      {
-        "actions": {
-          "KW_ELSE": "s583"
+          "SEMI": "s557"
         },
         "gotos": {},
-        "id": 575
-      },
-      {
-        "actions": {
-          "SEMI": "s584"
-        },
-        "gotos": {},
-        "id": 576
+        "id": 551
       },
       {
         "actions": {
@@ -60284,14 +59308,14 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "RPAREN": "r196"
         },
         "gotos": {},
-        "id": 577
+        "id": 552
       },
       {
         "actions": {
-          "RPAREN": "s585"
+          "RPAREN": "s558"
         },
         "gotos": {},
-        "id": 578
+        "id": 553
       },
       {
         "actions": {
@@ -60349,7 +59373,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 586,
+          "matched_stmt": 559,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
@@ -60361,10 +59385,10 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "unary_expr": 134,
           "unmatched_if": 269,
           "unmatched_iteration_stmt": 270,
-          "unmatched_stmt": 587,
+          "unmatched_stmt": 560,
           "unmatched_switch_stmt": 272
         },
-        "id": 579
+        "id": 554
       },
       {
         "actions": {
@@ -60374,91 +59398,15 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 308,
         "gotos": {},
-        "id": 580
+        "id": 555
       },
       {
         "actions": {
           "COMMA": "s219",
-          "RPAREN": "s588"
+          "RPAREN": "s561"
         },
         "gotos": {},
-        "id": 581
-      },
-      {
-        "actions": {
-          "RPAREN": "s589"
-        },
-        "gotos": {},
-        "id": 582
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s372",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_BREAK": "s239",
-          "KW_CASE": "s373",
-          "KW_CONTINUE": "s241",
-          "KW_DEFAULT": "s374",
-          "KW_DO": "s243",
-          "KW_FOR": "s375",
-          "KW_GENERIC": "s87",
-          "KW_GOTO": "s245",
-          "KW_IF": "s376",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_RETURN": "s248",
-          "KW_SIZEOF": "s92",
-          "KW_SWITCH": "s377",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "KW_WHILE": "s378",
-          "LBRACE": "s141",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "compound_stmt": 256,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 259,
-          "inclusive_or_expr": 108,
-          "jump_stmt": 261,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "matched_if": 263,
-          "matched_iteration_stmt": 264,
-          "matched_stmt": 586,
-          "matched_switch_stmt": 266,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 583
+        "id": 556
       },
       {
         "actions": {
@@ -60543,7 +59491,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 170,
         "gotos": {},
-        "id": 584
+        "id": 557
       },
       {
         "actions": {
@@ -60601,7 +59549,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "logical_or_expr": 110,
           "matched_if": 263,
           "matched_iteration_stmt": 264,
-          "matched_stmt": 590,
+          "matched_stmt": 562,
           "matched_switch_stmt": 266,
           "multiplicative_expr": 111,
           "postfix_expr": 112,
@@ -60613,10 +59561,10 @@ BUNDLE: dict[str, Any] = json.loads(r"""
           "unary_expr": 134,
           "unmatched_if": 269,
           "unmatched_iteration_stmt": 270,
-          "unmatched_stmt": 591,
+          "unmatched_stmt": 563,
           "unmatched_switch_stmt": 272
         },
-        "id": 585
+        "id": 558
       },
       {
         "actions": {
@@ -60701,7 +59649,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 166,
         "gotos": {},
-        "id": 586
+        "id": 559
       },
       {
         "actions": {
@@ -60785,7 +59733,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 168,
         "gotos": {},
-        "id": 587
+        "id": 560
       },
       {
         "actions": {
@@ -60795,76 +59743,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 28,
         "gotos": {},
-        "id": 588
-      },
-      {
-        "actions": {
-          "AMP": "s78",
-          "BANG": "s79",
-          "CHAR_LIT": "s80",
-          "DEC": "s81",
-          "FLOAT_LIT": "s82",
-          "IDENT": "s372",
-          "INC": "s84",
-          "INT_LIT": "s85",
-          "KW_ALIGNOF": "s86",
-          "KW_BREAK": "s239",
-          "KW_CASE": "s373",
-          "KW_CONTINUE": "s241",
-          "KW_DEFAULT": "s374",
-          "KW_DO": "s243",
-          "KW_FOR": "s375",
-          "KW_GENERIC": "s87",
-          "KW_GOTO": "s245",
-          "KW_IF": "s376",
-          "KW_IMAG": "s88",
-          "KW_NULLPTR": "s89",
-          "KW_OFFSETOF": "s90",
-          "KW_REAL": "s91",
-          "KW_RETURN": "s248",
-          "KW_SIZEOF": "s92",
-          "KW_SWITCH": "s377",
-          "KW_TYPES_COMPATIBLE_P": "s93",
-          "KW_VA_ARG": "s94",
-          "KW_WHILE": "s378",
-          "LBRACE": "s141",
-          "LPAREN": "s95",
-          "MINUS": "s96",
-          "PLUS": "s97",
-          "SEMI": "s252",
-          "STAR": "s98",
-          "STRING_LIT": "s99",
-          "TILDE": "s100"
-        },
-        "gotos": {
-          "additive_expr": 101,
-          "and_expr": 102,
-          "assignment_expr": 131,
-          "cast_expr": 103,
-          "compound_stmt": 256,
-          "conditional_expr": 132,
-          "equality_expr": 106,
-          "exclusive_or_expr": 107,
-          "expr": 258,
-          "expression_stmt": 259,
-          "inclusive_or_expr": 108,
-          "jump_stmt": 261,
-          "logical_and_expr": 109,
-          "logical_or_expr": 110,
-          "matched_if": 263,
-          "matched_iteration_stmt": 264,
-          "matched_stmt": 590,
-          "matched_switch_stmt": 266,
-          "multiplicative_expr": 111,
-          "postfix_expr": 112,
-          "primary_expr": 113,
-          "relational_expr": 114,
-          "shift_expr": 115,
-          "string_literal": 116,
-          "string_piece": 117,
-          "unary_expr": 134
-        },
-        "id": 589
+        "id": 561
       },
       {
         "actions": {
@@ -60949,7 +59828,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 171,
         "gotos": {},
-        "id": 590
+        "id": 562
       },
       {
         "actions": {
@@ -61033,7 +59912,7 @@ BUNDLE: dict[str, Any] = json.loads(r"""
         },
         "default_reduction": 173,
         "gotos": {},
-        "id": 591
+        "id": 563
       }
     ]
   },

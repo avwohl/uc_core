@@ -241,6 +241,18 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     _SUPPRESS_PREV = _TYPESPEC_PREV | frozenset({
         "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
     })
+    # Tokens that, while a type specifier is "open", continue the
+    # declarator *prefix* (pointers / type-qualifiers / extra spec
+    # keywords) without ending it. A typedef-named IDENT reached
+    # through only these is the declarator, not a second type-spec.
+    _DECL_CONTINUE = _TYPESPEC_PREV | frozenset({
+        "STAR", "KW_CONST", "KW_VOLATILE", "KW_RESTRICT", "KW_ATOMIC",
+    })
+    # Previous-token contexts in which an IDENT is *not* a declarator
+    # even if a specifier looks open: tag- and member-namespaces.
+    _NOT_DECL_PREV = frozenset({
+        "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
+    })
     # state[0] = offset of the currently-being-filtered token
     # state[1] = name of the previously-distinct token (used as `prev`
     #            for the suppress check)
@@ -252,10 +264,17 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     # state[6] = stack of (brace_depth_at_entry, set_of_shadowed_names)
     #            so when the brace depth drops back, we pop the
     #            shadow set added by the matching scope.
+    # state[7] = specifier-open flag: a type specifier has been seen in
+    #            the current declaration and only declarator-prefix
+    #            tokens have followed (so the next typedef-named IDENT
+    #            is the declarator, not the type).
+    # state[8] = set of token offsets forced to stay IDENT (declarator
+    #            names), so a parser re-query of the same offset is
+    #            stable across backtracking.
     # The parser may re-query the same offset multiple times during
     # lookahead; only advance state when the offset changes so the
     # `prev` context stays stable for a given token.
-    state = [-1, "", "", "", 0, 0, []]
+    state = [-1, "", "", "", 0, 0, [], False, set()]
 
     def filter_(_ctx, tok: Token) -> Token:
         offset = getattr(tok, "offset", -1)
@@ -278,41 +297,65 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
                 state[4] += 1
             elif tok.name == "RPAREN":
                 state[4] = max(0, state[4] - 1)
-            # When an IDENT follows a concrete type-spec keyword, it's
-            # a declarator name — shadow it for the rest of the
-            # enclosing block. This handles ``int byte`` where byte
-            # is a typedef-name being re-used as a parameter or local.
-            # Tag-namespace and member-namespace contexts (KW_STRUCT,
-            # DOT, ARROW, etc.) suppress the rewrite but DON'T shadow
-            # the name — `struct Regexp` introduces a tag, not a
-            # variable, and the typedef is still reachable.
-            if (
-                tok.name == "IDENT"
-                and state[1] in _TYPESPEC_PREV
-                and tok.text in names
+            # ---- specifier / declarator-name disambiguation ---------
+            # In a declaration the *first* specifier establishes the
+            # type; a later identifier reached only through pointer /
+            # qualifier / extra-spec tokens is the declarator name —
+            # even when its text is a known typedef-name. C keeps the
+            # two uses distinct, so all of:
+            #     typedef int T;  struct S { T *T; };
+            #     void f(T *T) { ... }
+            #     { T T = 5; }
+            # are valid (the 2nd `T` is a member/parameter/local).
+            # This also covers the original ``int byte`` keyword case
+            # (a concrete type keyword opens the specifier too).
+            prev_nm = state[1]
+            base_shadowed = any(tok.text in s for _d, s in state[6])
+            is_td_ident = tok.name == "IDENT" and tok.text in names
+            # Would this token, on its own, act as a type specifier
+            # (i.e. be rewritten to TYPEDEF_NAME)?
+            emits_typedef = (
+                is_td_ident
+                and prev_nm not in _SUPPRESS_PREV
+                and not base_shadowed
+            )
+            declarator_here = (
+                state[7]                       # a specifier is open
+                and is_td_ident                # ... and this is typedef-named
                 and (state[4] >= 1 or state[5] >= 1)
-                # Inside a function signature (paren_depth >= 1) or
-                # a block (brace_depth >= 1). File-scope typedef
-                # declarations stay unshadowed.
-            ):
-                # Parameters declared in a signature (state[4] >= 1)
-                # need to shadow the typedef in the following body, so
-                # add the shadow at brace_depth + 1 — that matches the
-                # body's brace depth and survives the LPAREN/RPAREN
-                # pair without being popped.
+                # Inside a signature (paren_depth >= 1) or a block
+                # (brace_depth >= 1); file-scope typedef declarations
+                # stay unshadowed.
+                and prev_nm not in _NOT_DECL_PREV
+            )
+            if declarator_here:
+                # The declarator name shadows the typedef for the
+                # enclosing block. The +1 depth makes a parameter
+                # shadow survive the signature's paren pair and apply
+                # to the function body.
                 target_depth = state[5]
                 if not state[6] or state[6][-1][0] != target_depth + 1:
                     state[6].append((target_depth + 1, set()))
                 state[6][-1][1].add(tok.text)
+                state[8].add(offset)
+                state[7] = False               # declarator consumed
+            elif emits_typedef or tok.name in _TYPESPEC_PREV:
+                state[7] = True                # a type specifier
+            elif state[7] and tok.name in _DECL_CONTINUE:
+                pass                           # still in declarator prefix
+            else:
+                state[7] = False               # specifier context ended
         prev_name = state[1]
         # Walk the shadow stack: if any frame contains this name, the
-        # IDENT is shadowed; don't rewrite.
+        # IDENT is shadowed; don't rewrite. A forced declarator offset
+        # is likewise kept as IDENT.
         shadowed = any(tok.text in s for _d, s in state[6])
         if (
             tok.name == "IDENT"
             and tok.text in names
             and prev_name not in _SUPPRESS_PREV
             and not shadowed
+            and offset not in state[8]
         ):
             return Token(
                 name="TYPEDEF_NAME",
