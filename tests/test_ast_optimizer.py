@@ -154,6 +154,20 @@ def test_optimize_returns_a_translation_unit():
     assert isinstance(out, ast.TranslationUnit)
 
 
+@pytest.mark.parametrize("src,kind,op", [
+    ("int g(int i){ return (i++) * 2; }", "PostfixOp", "++"),
+    ("int g(int i){ return (i--) * 2; }", "PostfixOp", "--"),
+    ("int g(int i){ return (++i) * 2; }", "UnaryOp", "++"),
+])
+def test_side_effecting_operand_not_duplicated(src, kind, op):
+    """Correctness: strength reduction must not duplicate an operand
+    with side effects (`(i++) * 2` must NOT become `(i++) + (i++)`).
+    Regression for PostfixOp being invisible to _expr_has_side_effects."""
+    unit = _optimize(src)
+    incs = [n for n in _find(unit, kind) if getattr(n.op, "text", n.op) == op]
+    assert len(incs) == 1, f"{op} duplicated: {len(incs)} occurrences"
+
+
 # --------------------------------------------------------------------------
 # Constant folding
 # --------------------------------------------------------------------------

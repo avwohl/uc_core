@@ -1017,7 +1017,7 @@ class ASTOptimizer:
         elif isinstance(node, ast.BinaryOp):
             self._collect_address_taken(node.left)
             self._collect_address_taken(node.right)
-        elif isinstance(node, ast.UnaryOp):
+        elif isinstance(node, (ast.UnaryOp, ast.PostfixOp)):
             self._collect_address_taken(node.operand)
         elif isinstance(node, ast.TernaryOp):
             self._collect_address_taken(node.condition)
@@ -1057,7 +1057,7 @@ class ASTOptimizer:
             if lk is None or rk is None:
                 return None
             return f"BIN:{_op(expr)}:{lk}:{rk}"
-        if isinstance(expr, ast.UnaryOp):
+        if isinstance(expr, (ast.UnaryOp, ast.PostfixOp)):
             if _op(expr) in ("++", "--", "*", "&"):
                 return None  # side effects or pointer deref
             ok = ASTOptimizer._expr_key(expr.operand)
@@ -1089,7 +1089,7 @@ class ASTOptimizer:
         elif isinstance(expr, ast.BinaryOp):
             result.update(ASTOptimizer._get_expr_vars(expr.left))
             result.update(ASTOptimizer._get_expr_vars(expr.right))
-        elif isinstance(expr, ast.UnaryOp):
+        elif isinstance(expr, (ast.UnaryOp, ast.PostfixOp)):
             result.update(ASTOptimizer._get_expr_vars(expr.operand))
         elif isinstance(expr, ast.TernaryOp):
             result.update(ASTOptimizer._get_expr_vars(expr.condition))
@@ -1119,7 +1119,7 @@ class ASTOptimizer:
         # twice and skipping a value.
         if isinstance(expr, ast.VaArgExpr):
             return True
-        if isinstance(expr, ast.UnaryOp):
+        if isinstance(expr, (ast.UnaryOp, ast.PostfixOp)):
             if _op(expr) in ("++", "--"):
                 return True
             return ASTOptimizer._expr_has_side_effects(expr.operand)
@@ -1203,7 +1203,7 @@ class ASTOptimizer:
         if isinstance(expr, ast.BinaryOp):
             return (ASTOptimizer._expr_references_var(expr.left, name) or
                     ASTOptimizer._expr_references_var(expr.right, name))
-        if isinstance(expr, ast.UnaryOp):
+        if isinstance(expr, (ast.UnaryOp, ast.PostfixOp)):
             return ASTOptimizer._expr_references_var(expr.operand, name)
         if isinstance(expr, ast.TernaryOp):
             return (ASTOptimizer._expr_references_var(expr.condition, name) or
@@ -1232,7 +1232,7 @@ class ASTOptimizer:
                     result.add(_idname(expr.left))
             result.update(self._get_modified_vars_in_expr(expr.left))
             result.update(self._get_modified_vars_in_expr(expr.right))
-        elif isinstance(expr, ast.UnaryOp):
+        elif isinstance(expr, (ast.UnaryOp, ast.PostfixOp)):
             if _op(expr) in ("++", "--"):
                 if isinstance(expr.operand, ast.Identifier):
                     result.add(_idname(expr.operand))
@@ -1353,7 +1353,7 @@ class ASTOptimizer:
             return True
         if isinstance(expr, ast.BinaryOp):
             return ASTOptimizer._expr_has_calls(expr.left) or ASTOptimizer._expr_has_calls(expr.right)
-        if isinstance(expr, ast.UnaryOp):
+        if isinstance(expr, (ast.UnaryOp, ast.PostfixOp)):
             return ASTOptimizer._expr_has_calls(expr.operand)
         if isinstance(expr, ast.TernaryOp):
             return (ASTOptimizer._expr_has_calls(expr.condition) or
@@ -1477,7 +1477,7 @@ class ASTOptimizer:
                     return
             self._invalidate_caches_for_expr(expr.left)
             self._invalidate_caches_for_expr(expr.right)
-        elif isinstance(expr, ast.UnaryOp):
+        elif isinstance(expr, (ast.UnaryOp, ast.PostfixOp)):
             if _op(expr) in ("++", "--"):
                 if isinstance(expr.operand, ast.Identifier):
                     self._invalidate_cse_for_var(_idname(expr.operand))
