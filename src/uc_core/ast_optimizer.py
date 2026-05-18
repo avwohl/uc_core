@@ -55,6 +55,18 @@ def _idname(ident) -> str:
     return n.text if hasattr(n, "text") else n
 
 
+# The auto-AST splits function calls into Call (with args) and
+# CallNoArgs (no args; no `.args` field) — the same present/absent
+# node-split as IfStmt/IfStmtElse. A no-arg call still has side
+# effects, so both must be matched everywhere a call is analysed.
+_CALL = (ast.Call, ast.CallNoArgs)
+
+
+def _call_args(node) -> list:
+    """Argument list of a Call/CallNoArgs (CallNoArgs has none)."""
+    return getattr(node, "args", None) or []
+
+
 def _optok(text: str) -> Token:
     """Synthetic operator/punctuator Token for an optimizer-minted node."""
     return Token(name="OP", text=text, line=0, column=0, offset=0, file_id=0)
@@ -390,8 +402,9 @@ class ASTOptimizer:
                 self._changed = True
                 return expr.true_expr if _iv(expr.condition) != 0 else expr.false_expr
             return expr
-        elif isinstance(expr, ast.Call):
-            expr.args = [self._optimize_expr(a) for a in expr.args]
+        elif isinstance(expr, _CALL):
+            if isinstance(expr, ast.Call):
+                expr.args = [self._optimize_expr(a) for a in expr.args]
             return expr
         elif isinstance(expr, ast.Index):
             expr.array = self._optimize_expr(expr.array)
@@ -1023,9 +1036,9 @@ class ASTOptimizer:
             self._collect_address_taken(node.condition)
             self._collect_address_taken(node.true_expr)
             self._collect_address_taken(node.false_expr)
-        elif isinstance(node, ast.Call):
+        elif isinstance(node, _CALL):
             self._collect_address_taken(node.func)
-            for arg in node.args:
+            for arg in _call_args(node):
                 self._collect_address_taken(arg)
         elif isinstance(node, ast.Index):
             self._collect_address_taken(node.array)
@@ -1095,9 +1108,9 @@ class ASTOptimizer:
             result.update(ASTOptimizer._get_expr_vars(expr.condition))
             result.update(ASTOptimizer._get_expr_vars(expr.true_expr))
             result.update(ASTOptimizer._get_expr_vars(expr.false_expr))
-        elif isinstance(expr, ast.Call):
+        elif isinstance(expr, _CALL):
             result.update(ASTOptimizer._get_expr_vars(expr.func))
-            for arg in expr.args:
+            for arg in _call_args(expr):
                 result.update(ASTOptimizer._get_expr_vars(arg))
         elif isinstance(expr, ast.Index):
             result.update(ASTOptimizer._get_expr_vars(expr.array))
@@ -1111,7 +1124,7 @@ class ASTOptimizer:
     @staticmethod
     def _expr_has_side_effects(expr: ast.Expression) -> bool:
         """Check if an expression has side effects."""
-        if isinstance(expr, (ast.Call, ast.StmtExpr)):
+        if isinstance(expr, (ast.Call, ast.CallNoArgs, ast.StmtExpr)):
             return True
         # `va_arg(ap, T)` advances the va_list pointer — that's a
         # side effect. Without this, `va_arg(ap, int) * 2` got
@@ -1169,7 +1182,7 @@ class ASTOptimizer:
             return True
         if isinstance(expr, ast.Member) and expr.is_arrow:
             return True
-        if isinstance(expr, ast.Call):
+        if isinstance(expr, _CALL):
             return True
         if isinstance(expr, ast.BinaryOp):
             return (
@@ -1209,10 +1222,10 @@ class ASTOptimizer:
             return (ASTOptimizer._expr_references_var(expr.condition, name) or
                     ASTOptimizer._expr_references_var(expr.true_expr, name) or
                     ASTOptimizer._expr_references_var(expr.false_expr, name))
-        if isinstance(expr, ast.Call):
+        if isinstance(expr, _CALL):
             if ASTOptimizer._expr_references_var(expr.func, name):
                 return True
-            return any(ASTOptimizer._expr_references_var(a, name) for a in expr.args)
+            return any(ASTOptimizer._expr_references_var(a, name) for a in _call_args(expr))
         if isinstance(expr, ast.Index):
             return (ASTOptimizer._expr_references_var(expr.array, name) or
                     ASTOptimizer._expr_references_var(expr.index, name))
@@ -1241,8 +1254,8 @@ class ASTOptimizer:
             result.update(self._get_modified_vars_in_expr(expr.condition))
             result.update(self._get_modified_vars_in_expr(expr.true_expr))
             result.update(self._get_modified_vars_in_expr(expr.false_expr))
-        elif isinstance(expr, ast.Call):
-            for arg in expr.args:
+        elif isinstance(expr, _CALL):
+            for arg in _call_args(expr):
                 result.update(self._get_modified_vars_in_expr(arg))
         elif isinstance(expr, ast.Index):
             result.update(self._get_modified_vars_in_expr(expr.array))
@@ -1349,7 +1362,7 @@ class ASTOptimizer:
     @staticmethod
     def _expr_has_calls(expr: ast.Expression) -> bool:
         """Check if an expression tree contains any function calls."""
-        if isinstance(expr, ast.Call):
+        if isinstance(expr, _CALL):
             return True
         if isinstance(expr, ast.BinaryOp):
             return ASTOptimizer._expr_has_calls(expr.left) or ASTOptimizer._expr_has_calls(expr.right)
@@ -1487,7 +1500,7 @@ class ASTOptimizer:
                     self._clear_all_caches()
                     return
             self._invalidate_caches_for_expr(expr.operand)
-        elif isinstance(expr, ast.Call):
+        elif isinstance(expr, _CALL):
             # Function call: clear entire cache (can modify globals, address-taken vars)
             self._clear_all_caches()
         elif isinstance(expr, ast.TernaryOp):

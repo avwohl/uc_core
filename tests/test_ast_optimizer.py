@@ -168,6 +168,22 @@ def test_side_effecting_operand_not_duplicated(src, kind, op):
     assert len(incs) == 1, f"{op} duplicated: {len(incs)} occurrences"
 
 
+@pytest.mark.parametrize("src,callkind", [
+    # No-arg call: CallNoArgs node-split, was invisible to side-effect
+    # analysis -> strength reduction duplicated the call (caught by
+    # uc386 validation, Phase 4).
+    ("int side(void); int g(void){ return side() * 2; }", "CallNoArgs"),
+    ("int side(int); int g(void){ return side(1) * 2; }", "Call"),
+    # Side-effecting object of a member access must not be duplicated.
+    ("struct S{int x;}; struct S mk(void); int g(void){ return mk().x * 2; }", "CallNoArgs"),
+])
+def test_call_not_duplicated_by_strength_reduction(src, callkind):
+    """Correctness: a call (with or without args) has side effects and
+    must never be duplicated by `* 2` -> `+`."""
+    unit = _optimize(src)
+    assert len(_find(unit, callkind)) == 1, f"{callkind} duplicated"
+
+
 # --------------------------------------------------------------------------
 # Constant folding
 # --------------------------------------------------------------------------
