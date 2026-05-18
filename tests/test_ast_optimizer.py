@@ -92,17 +92,11 @@ def _only_function_body(unit):
     return fns[0].body
 
 
-# Phases 0-3 are done: node construction, operator/identifier accessors,
-# statement dispatch, and the ReturnStmt/ReturnStmtValue split are all
-# migrated. The three transforms below stay xfail(strict) because each
-# is blocked by a *distinct, non-mechanical* gap (a follow-up unit of
-# work, not auto-AST migration). strict=True still flags any change.
-_XFAIL_COPY = (
-    "blocked: copy-prop's _types_compatible_for_copy needs resolved "
-    "type categories, but the Phase-6 auto-AST carries no resolved "
-    "types (_var_types is None), so the guard always refuses. Needs a "
-    "declarator-shaped type-category derivation (separate work)."
-)
+# Migration (Phases 0-4) and all three optimization follow-ups
+# (loop-unroll decl-form, dead-store, copy-prop) are complete — every
+# corpus transform now runs. No xfail markers remain; the strict
+# regression guards below lock in the correctness invariants the
+# copy-prop type guard must preserve.
 
 
 # A spread of real-ish C the optimizer must survive without raising.
@@ -249,12 +243,45 @@ def test_unreachable_after_return_removed():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason=_XFAIL_COPY, strict=True)
 def test_copy_propagation():
-    # int a = p; int b = a + a;  ->  b computed from p, `a` propagated away.
+    # int a = p; int b = a + a;  ->  b computed from p, `a` propagated
+    # away. Enabled by the copy-prop follow-up: a conservative
+    # declarator-shaped type key (here both `int`) makes the copy safe.
     unit = _optimize("int h(int p){ int a = p; int b = a + a; return b; }")
     idents = {t.name.text for t in _find(unit, "Identifier")}
     assert "a" not in idents
+
+
+# --- copy-prop safety guards: these MUST NOT propagate (the type/alias
+# guard exists precisely to prevent these miscompiles). Each asserts
+# `a` survives, i.e. the copy was refused.
+
+def test_copy_prop_refused_float_to_int():
+    """`int a = fv;` is a float->int conversion; propagating `a`->`fv`
+    would skip the truncation."""
+    unit = _optimize("int h(float fv){ int a = fv; int b = a + a; return b; }")
+    assert "a" in {t.name.text for t in _find(unit, "Identifier")}
+
+
+def test_copy_prop_refused_pointer_type():
+    """Pointer declarators yield no type key -> refuse (avoids the
+    `struct* = void*` member-access miscompile class)."""
+    unit = _optimize("int deref(void *vp){ int *ip = vp; int *jp = ip; return *jp; }")
+    assert "ip" in {t.name.text for t in _find(unit, "Identifier")}
+
+
+def test_copy_prop_refused_when_address_taken():
+    """`&a` taken: a write through the pointer could be missed if `a`
+    were propagated away."""
+    src = "int h(int p){ int a = p; int *q = &a; *q = 9; return a; }"
+    unit = _optimize(src)
+    assert "a" in {t.name.text for t in _find(unit, "Identifier")}
+
+
+def test_copy_prop_refused_volatile():
+    """A volatile variable's reads must not be elided."""
+    unit = _optimize("int h(int p){ volatile int a = p; return a + a; }")
+    assert "a" in {t.name.text for t in _find(unit, "Identifier")}
 
 
 def test_dead_store_elimination():

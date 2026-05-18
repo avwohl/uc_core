@@ -67,6 +67,46 @@ def _call_args(node) -> list:
     return getattr(node, "args", None) or []
 
 
+def _decl_type_key(decl_specs, declarator) -> str | None:
+    """A canonical type string for copy-propagation safety, or None to
+    refuse (conservative).
+
+    Copy propagation `x -> y` is only sound when `x` and `y` have the
+    *identical* type, so the copy performs no implicit conversion
+    (float->int truncation, pointer-kind change, ...) and rewriting
+    uses of `x` as `y` preserves the type for downstream codegen.
+
+    This deliberately only resolves the unambiguous cases: a bare
+    scalar / typedef-name declarator (no pointer / array / function),
+    no `volatile`. Anything else returns None (refuse — a missed
+    optimization, never a miscompile)."""
+    # Pointer/array/function declarators are not a bare ``Declarator``.
+    if type(declarator).__name__ != "Declarator":
+        return None
+    kws: list[str] = []
+    for sp in decl_specs or []:
+        n = type(sp).__name__
+        if n == "BasicTypeSpec":
+            kws.append(sp.kw.text)
+        elif n == "TypedefNameSpec":
+            kws.append("td:" + sp.name.text)
+        elif n == "TypeQualifier":
+            if getattr(sp.kw, "text", "") == "volatile":
+                return None  # a volatile read must not be elided
+            # const/restrict don't change the value representation
+        elif n == "StorageClass":
+            pass  # static/extern/register/... irrelevant to value copy
+        else:
+            # struct/union/enum/typeof/_BitInt/_Atomic/alignas/...:
+            # refuse rather than risk an unsound match.
+            return None
+    if not kws:
+        return None
+    # C allows type specifiers in any order; sort so
+    # `unsigned long` == `long unsigned`.
+    return " ".join(sorted(kws))
+
+
 def _optok(text: str) -> Token:
     """Synthetic operator/punctuator Token for an optimizer-minted node."""
     return Token(name="OP", text=text, line=0, column=0, offset=0, file_id=0)
@@ -116,7 +156,10 @@ class ASTOptimizer:
         self._cse_cache: dict[str, ast.Expression] = {}
         self._cse_deps: dict[str, set[str]] = {}
         self._copies: dict[str, str] = {}
-        self._var_types: dict[str, ast.TypeNode] = {}  # Track declared types for safe copy prop
+        # name -> conservative type key (str) for copy-prop safety;
+        # None means "unknown type, never copy-propagate". See
+        # _decl_type_key / _types_compatible_for_copy.
+        self._var_types: dict[str, str | None] = {}
         self._address_taken_vars: set[str] = set()
 
     def optimize(self, tu: ast.TranslationUnit) -> ast.TranslationUnit:
@@ -137,11 +180,10 @@ class ASTOptimizer:
             if decl.body is not None:
                 if self.opt_level >= 3:
                     self._reset_level3_state()
-                    # Track parameter names from the declarator chain;
-                    # types are now declarator-shaped and we no longer
-                    # carry them as resolved types in _var_types.
-                    for name in _function_param_names(decl.declarator):
-                        self._var_types[name] = None
+                    # Track parameter names + a conservative type key
+                    # (declarator-shaped; None = unknown -> no copy-prop).
+                    for name, tkey in _function_param_typekeys(decl.declarator):
+                        self._var_types[name] = tkey
                     self._collect_address_taken(decl.body)
                 self._optimize_stmt(decl.body)
         elif isinstance(decl, ast.Declaration):
@@ -1450,16 +1492,23 @@ class ASTOptimizer:
         if isinstance(item, ast.ExpressionStmt) and item.expr is not None:
             self._invalidate_caches_for_expr(item.expr)
         elif isinstance(item, ast.Declaration):
-            # Each initialized declarator assigns its variable.
             for d in item.declarators or []:
-                if not isinstance(d, ast.InitDeclaratorWithInit):
+                decl = getattr(d, "declarator", None)
+                if decl is None:
                     continue
-                nm = _declarator_ident(d.declarator)
+                nm = _declarator_ident(decl)
                 if nm is None:
                     continue
+                # Record the declared type for *every* declarator (even
+                # without an initializer) so a later `nm = y;` can be
+                # copy-tracked too.
+                self._var_types[nm] = _decl_type_key(item.decl_specs, decl)
+                if not isinstance(d, ast.InitDeclaratorWithInit):
+                    continue
+                # The initializer assigns nm.
                 self._invalidate_cse_for_var(nm)
                 self._invalidate_copies_for_var(nm)
-                # Track copy `x = y` when the types are compatible.
+                # Track copy `nm = y` when the types are identical.
                 if isinstance(d.init, ast.Identifier):
                     src = _idname(d.init)
                     if self._types_compatible_for_copy(nm, src):
@@ -1520,40 +1569,22 @@ class ASTOptimizer:
             del self._copies[k]
 
     def _types_compatible_for_copy(self, target: str, source: str) -> bool:
-        """Check if copy propagation is safe between two variables.
+        """Whether copy propagation `target <- source` is sound.
 
-        Only propagate when both variables have the same basic type category
-        (both int-like, both float, both pointers, etc.) to avoid miscompilation
-        when assignments perform implicit type conversion (e.g., float -> int).
-        """
+        Safe only when both variables have the *identical* resolved
+        type key (so the copy performs no implicit conversion and
+        rewriting uses of `target` as `source` preserves the type for
+        codegen) AND neither has had its address taken (a write through
+        a pointer to it could otherwise be missed). Unknown type
+        (None key) -> refuse. This is intentionally conservative: a
+        false negative is a missed optimization; a false positive is a
+        miscompile."""
+        if (target in self._address_taken_vars
+                or source in self._address_taken_vars):
+            return False
         t1 = self._var_types.get(target)
         t2 = self._var_types.get(source)
-        if t1 is None or t2 is None:
-            return False  # Unknown type, don't propagate
-        # Both must be BasicType with the same name, or both PointerType, etc.
-        if type(t1) != type(t2):
-            return False
-        if isinstance(t1, ast.BasicType) and isinstance(t2, ast.BasicType):
-            # Must be same type category (e.g., both "int", both "float")
-            return t1.name == t2.name
-        # For pointers, also require the pointee's type category to match.
-        # `struct printer *pr = void_ptr;` is a legal C conversion, but if
-        # the optimizer rewrites later `pr->m` references as `void_ptr->m`,
-        # downstream `_type_of` loses the declared struct type. Without this
-        # guard, the codegen rejects the resulting `->` lowering.
-        if isinstance(t1, ast.PointerType) and isinstance(t2, ast.PointerType):
-            b1, b2 = t1.base_type, t2.base_type
-            # void* on either side: refuse propagation. The conversion loses
-            # type information needed for member access.
-            if (isinstance(b1, ast.BasicType) and b1.name == "void"):
-                return False
-            if (isinstance(b2, ast.BasicType) and b2.name == "void"):
-                return False
-            # Different kinds of pointee (struct vs basic, etc.): refuse.
-            if type(b1) != type(b2):
-                return False
-        # For arrays, structs - same type means compatible
-        return True
+        return t1 is not None and t1 == t2
 
     # === Level 3: Dead store elimination ===
 
@@ -2103,6 +2134,24 @@ def _function_param_names(declarator) -> list[str]:
             name = _declarator_ident(p.declarator)
             if name is not None:
                 out.append(name)
+    return out
+
+
+def _function_param_typekeys(declarator) -> list[tuple[str, str | None]]:
+    """Like _function_param_names, but also the conservative
+    copy-prop type key for each parameter (see _decl_type_key)."""
+    fn = _outermost_fn_declarator(declarator)
+    if fn is None or isinstance(fn, ast.FnDeclaratorEmpty):
+        return []
+    params = fn.params
+    if isinstance(params, ast.VariadicParams):
+        params = params.params
+    out: list[tuple[str, str | None]] = []
+    for p in params or []:
+        if isinstance(p, ast.ParamDecl):
+            name = _declarator_ident(p.declarator)
+            if name is not None:
+                out.append((name, _decl_type_key(p.decl_specs, p.declarator)))
     return out
 
 
