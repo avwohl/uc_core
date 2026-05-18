@@ -103,11 +103,6 @@ _XFAIL_COPY = (
     "types (_var_types is None), so the guard always refuses. Needs a "
     "declarator-shaped type-category derivation (separate work)."
 )
-_XFAIL_DEADSTORE = (
-    "blocked: _eliminate_dead_stores only treats assignment statements "
-    "as stores, not declaration initializers (`int x = 1;`). Needs "
-    "declaration-initializer-aware dead-store analysis (separate work)."
-)
 
 
 # A spread of real-ish C the optimizer must survive without raising.
@@ -262,11 +257,36 @@ def test_copy_propagation():
     assert "a" not in idents
 
 
-@pytest.mark.xfail(reason=_XFAIL_DEADSTORE, strict=True)
 def test_dead_store_elimination():
     # x = 1; is dead (overwritten before any use); the 1 must disappear.
+    # Enabled by the dead-store follow-up: a single-init declaration
+    # now counts as a store; the declarator is kept (var stays
+    # declared), only the dead initializer is dropped.
     unit = _optimize("int f(void){ int x = 1; x = 2; return x; }")
     assert 1 not in _int_literals(_only_function_body(unit))
+
+
+def test_dead_store_keeps_variable_declared():
+    """Stripping a dead initializer must keep the declaration so the
+    variable stays declared and scoped."""
+    unit = _optimize("int f(void){ int x = 1; x = 2; return x; }")
+    body = _only_function_body(unit)
+    decls = _find(body, "InitDeclarator") + _find(body, "InitDeclaratorWithInit")
+    names = {_d.declarator.name.text for _d in decls
+             if type(_d.declarator).__name__ == "Declarator"}
+    assert "x" in names, "declaration of x was lost"
+
+
+def test_dead_store_not_applied_to_volatile():
+    """A volatile initializer must NOT be elided (observable write)."""
+    unit = _optimize("int f(void){ volatile int x = 1; x = 2; return x; }")
+    assert 1 in _int_literals(_only_function_body(unit))
+
+
+def test_dead_store_keeps_side_effecting_initializer():
+    """`int x = f(); x = 2;` must keep the call (f() has side effects)."""
+    unit = _optimize("int side(void); int f(void){ int x = side(); x = 2; return x; }")
+    assert len(_find(unit, "CallNoArgs")) == 1
 
 
 def test_small_constant_loop_is_unrolled():

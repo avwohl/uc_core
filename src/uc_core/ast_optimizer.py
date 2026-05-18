@@ -1566,29 +1566,47 @@ class ASTOptimizer:
         i = 0
         while i < len(items):
             if i + 1 < len(items):
-                # Check for consecutive assignments to same variable
+                # Consecutive stores to the same variable where the
+                # first is overwritten before any use. `first` may be a
+                # plain assignment `x = e;` or a single-init
+                # declaration `T x = e;`; `second` is the overwriting
+                # assignment `x = e2;`.
                 first = items[i]
                 second = items[i + 1]
-                first_target = self._get_simple_assign_target(first)
                 second_target = self._get_simple_assign_target(second)
+
+                first_target = self._get_simple_assign_target(first)
+                first_stripped = None  # set iff first is a declaration
+                if first_target is not None:
+                    first_rhs = self._get_assign_rhs(first)
+                else:
+                    ds = self._decl_init_store(first)
+                    if ds is not None:
+                        first_target, first_rhs, first_stripped = ds
+                    else:
+                        first_rhs = None
 
                 if (first_target is not None and second_target is not None
                         and first_target == second_target):
-                    first_rhs = self._get_assign_rhs(first)
                     second_rhs = self._get_assign_rhs(second)
                     if (first_rhs is not None
                             and not self._expr_has_side_effects(first_rhs)
                             and second_rhs is not None
                             and not self._expr_references_var(second_rhs, first_target)
                             and not self._expr_has_pointer_or_call(second_rhs)):
-                        # Dead store: skip first assignment.
-                        # We're conservative when the second RHS contains
-                        # a pointer dereference or function call — either
-                        # could observe the first store via aliasing
-                        # (e.g. `b = a; b = *p;` where p points to b).
+                        # Dead store. We're conservative when the second
+                        # RHS contains a pointer dereference or function
+                        # call — either could observe the first store
+                        # via aliasing (e.g. `b = a; b = *p;` where p
+                        # points to b).
                         self._stat("dead_store")
                         self._changed = True
-                        i += 1  # Skip to second, which will be added next iteration
+                        if first_stripped is not None:
+                            # Declaration: keep it (the variable must
+                            # stay declared/scoped), drop only the dead
+                            # initializer.
+                            result.append(first_stripped)
+                        i += 1  # skip the original first store
                         continue
 
             result.append(items[i])
@@ -1616,6 +1634,34 @@ class ASTOptimizer:
         if not isinstance(expr, ast.BinaryOp) or _op(expr) != "=":
             return None
         return expr.right
+
+    @staticmethod
+    def _decl_init_store(item):
+        """If `item` is `T x = expr;` — a Declaration with exactly one
+        InitDeclaratorWithInit naming a plain identifier, not declared
+        `volatile` — return ``(name, init_expr, decl_without_init)``.
+        The returned declaration keeps the declarator so the variable
+        stays declared and scoped; only the (dead) initializer is
+        dropped. Otherwise None."""
+        if not isinstance(item, ast.Declaration):
+            return None
+        decls = item.declarators or []
+        if len(decls) != 1 or not isinstance(decls[0], ast.InitDeclaratorWithInit):
+            return None
+        for sp in item.decl_specs or []:
+            if (isinstance(sp, ast.TypeQualifier)
+                    and getattr(sp.kw, "text", "") == "volatile"):
+                return None  # a volatile write must not be elided
+        d = decls[0]
+        name = _declarator_ident(d.declarator)
+        if name is None:
+            return None
+        stripped = ast.Declaration(
+            decl_specs=item.decl_specs,
+            declarators=[ast.InitDeclarator(declarator=d.declarator, pos=d.pos)],
+            pos=item.pos,
+        )
+        return name, d.init, stripped
 
     # === Level 3: Loop unrolling ===
 
