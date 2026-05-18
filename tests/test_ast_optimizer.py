@@ -144,8 +144,11 @@ def test_optimize_returns_a_translation_unit():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_fold_constant_initializer():
+    # Enabled by Phase 1: Declaration initializers are on the reachable
+    # path (_optimize_decl -> _optimize_expr), so constructor/operator
+    # accessor migration makes this fold work. Function-body folds stay
+    # xfail until statement dispatch is enabled (Phase 2).
     unit = _optimize("int a = 2 + 3 * 4;")
     init = _find(unit, "InitDeclaratorWithInit")[0].init
     assert isinstance(init, ast.IntLiteral) and int_value(init) == 14

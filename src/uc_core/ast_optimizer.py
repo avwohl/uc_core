@@ -24,12 +24,40 @@ import copy
 import dataclasses
 from . import ast
 from ._const import int_value, int_flags, make_int_lit
+from .c23_parser import Token
+from .codegen_helpers import make_identifier
 from .type_config import TypeConfig, Z80_CPM
 
 
 def _iv(lit):
     """Shorthand for int_value when the caller already knows lit is an IntLiteral."""
     return int_value(lit)
+
+
+# --- auto-AST node helpers -------------------------------------------------
+# The Phase-6 auto-AST stores BinaryOp/UnaryOp `.op` as a Token (not a
+# str) and carries source position on `.pos` (no `.location`). These
+# helpers let the optimizer read operators uniformly and mint
+# replacement nodes in the auto-AST shape.
+
+def _op(node) -> str:
+    """Operator text of a BinaryOp/UnaryOp. Tolerates a bare str so
+    optimizer-minted nodes and any legacy callers both work."""
+    o = node.op
+    return o.text if hasattr(o, "text") else o
+
+
+def _optok(text: str) -> Token:
+    """Synthetic operator/punctuator Token for an optimizer-minted node."""
+    return Token(name="OP", text=text, line=0, column=0, offset=0, file_id=0)
+
+
+def _binop(op: str, left, right) -> "ast.BinaryOp":
+    return ast.BinaryOp(left=left, op=_optok(op), right=right)
+
+
+def _unop(op: str, operand) -> "ast.UnaryOp":
+    return ast.UnaryOp(op=_optok(op), operand=operand)
 
 
 def _expr_has_float(node) -> bool:
@@ -194,11 +222,9 @@ class ASTOptimizer:
                             stmt.then_branch = else_b
                             if has_else_attr:
                                 stmt.else_branch = None
-                            stmt.condition = ast.IntLiteral(value=1,
-                                                            location=stmt.condition.location)
+                            stmt.condition = make_int_lit(1)
                         else:
-                            stmt.then_branch = ast.CompoundStmt(items=[],
-                                                                location=stmt.location)
+                            stmt.then_branch = ast.CompoundStmt(items=[])
                     else:
                         # Then-branch has labels, can't eliminate
                         self._optimize_stmt(stmt.then_branch)
@@ -225,7 +251,7 @@ class ASTOptimizer:
                     and not self._contains_label(stmt.body)):
                 self._stat("dead_code")
                 self._changed = True
-                stmt.body = ast.CompoundStmt(items=[], location=stmt.location)
+                stmt.body = ast.CompoundStmt(items=[])
             else:
                 if self.opt_level >= 3:
                     self._clear_all_caches()
@@ -305,12 +331,11 @@ class ASTOptimizer:
             if expr.name in self._copies:
                 self._stat("copy_prop")
                 self._changed = True
-                return ast.Identifier(name=self._copies[expr.name],
-                                      location=expr.location)
+                return make_identifier(self._copies[expr.name])
 
         if isinstance(expr, ast.BinaryOp):
             # For assignments, protect LHS from copy propagation
-            if expr.op in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
+            if _op(expr) in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
                            "^=", "<<=", ">>="):
                 # Optimize sub-expressions in LHS (array indices, pointer deref)
                 # but NOT a simple Identifier target (no copy prop on lvalues)
@@ -330,7 +355,7 @@ class ASTOptimizer:
             return result
         elif isinstance(expr, ast.UnaryOp):
             # Don't optimize operand of address-of or dereference or ++/--
-            if expr.op in ("&", "*", "++", "--"):
+            if _op(expr) in ("&", "*", "++", "--"):
                 return expr
             expr.operand = self._optimize_expr(expr.operand)
             result = self._optimize_unary(expr)
@@ -387,7 +412,7 @@ class ASTOptimizer:
     # === Binary operation optimizer ===
 
     def _optimize_binary(self, expr: ast.BinaryOp) -> ast.Expression:
-        op = expr.op
+        op = _op(expr)
         left = expr.left
         right = expr.right
 
@@ -429,13 +454,7 @@ class ASTOptimizer:
                         result -= (mask + 1)
                 self._stat("const_fold")
                 self._changed = True
-                return ast.IntLiteral(
-                    value=result,
-                    is_long=is_long,
-                    is_long_long=is_long_long,
-                    is_unsigned=unsigned,
-                    location=expr.location,
-                )
+                return make_int_lit(result)
 
         # === Strength reduction: multiply by power-of-2 ===
         if op == "*":
@@ -449,18 +468,14 @@ class ASTOptimizer:
             if shift is not None and self._is_unsigned_literal(left, right):
                 self._stat("div_to_shift")
                 self._changed = True
-                return ast.BinaryOp(op=">>", left=left, right=ast.IntLiteral(
-                    value=shift, location=right.location),
-                    location=expr.location)
+                return _binop(">>", left, make_int_lit(shift))
 
         if op == "%" and isinstance(right, ast.IntLiteral):
             shift = self._log2_if_power_of_2(_iv(right))
             if shift is not None and self._is_unsigned_literal(left, right):
                 self._stat("mod_to_and")
                 self._changed = True
-                return ast.BinaryOp(op="&", left=left, right=ast.IntLiteral(
-                    value=_iv(right) - 1, is_unsigned=True, location=right.location),
-                    location=expr.location)
+                return _binop("&", left, make_int_lit(_iv(right) - 1))
 
         # === Algebraic identity elements ===
         r = self._simplify_identity(expr)
@@ -486,24 +501,24 @@ class ASTOptimizer:
             if op == "^" or op == "-":
                 self._stat("self_zero")
                 self._changed = True
-                return ast.IntLiteral(value=0, location=expr.location)
+                return make_int_lit(0)
             # Comparison simplifications
             if op == "==":
                 self._stat("self_cmp")
                 self._changed = True
-                return ast.IntLiteral(value=1, location=expr.location)
+                return make_int_lit(1)
             if op == "!=":
                 self._stat("self_cmp")
                 self._changed = True
-                return ast.IntLiteral(value=0, location=expr.location)
+                return make_int_lit(0)
             if op == "<" or op == ">":
                 self._stat("self_cmp")
                 self._changed = True
-                return ast.IntLiteral(value=0, location=expr.location)
+                return make_int_lit(0)
             if op == "<=" or op == ">=":
                 self._stat("self_cmp")
                 self._changed = True
-                return ast.IntLiteral(value=1, location=expr.location)
+                return make_int_lit(1)
 
         # === Idempotent boolean simplifications ===
         r = self._simplify_idempotent(expr)
@@ -526,7 +541,7 @@ class ASTOptimizer:
     # === Unary operation optimizer ===
 
     def _optimize_unary(self, expr: ast.UnaryOp) -> ast.Expression:
-        op = expr.op
+        op = _op(expr)
         operand = expr.operand
 
         # Constant folding for unary operations
@@ -555,22 +570,11 @@ class ASTOptimizer:
                 self._changed = True
                 # Per C99 6.5.3.3: ! operator always returns int (not unsigned, not long)
                 if op == "!":
-                    return ast.IntLiteral(
-                        value=result,
-                        is_long=False,
-                        is_unsigned=False,
-                        location=expr.location,
-                    )
-                return ast.IntLiteral(
-                    value=result,
-                    is_long=int_flags(operand)[0],
-                    is_long_long=getattr(operand, 'is_long_long', False),
-                    is_unsigned=int_flags(operand)[2],
-                    location=expr.location,
-                )
+                    return make_int_lit(result)
+                return make_int_lit(result)
 
         # Double negation: -(-x) → x, ~(~x) → x
-        if isinstance(operand, ast.UnaryOp) and operand.op == op and op in ("-", "~"):
+        if isinstance(operand, ast.UnaryOp) and _op(operand) == op and op in ("-", "~"):
             self._stat("double_neg")
             self._changed = True
             return operand.operand
@@ -633,11 +637,8 @@ class ASTOptimizer:
                 # Skip when `other` has side effects — duplicating a
                 # `(n += 5)` or function-call operand would fire the
                 # effect twice and produce the wrong value.
-                return ast.BinaryOp(op="+", left=other, right=other,
-                                    location=expr.location)
-            return ast.BinaryOp(op="<<", left=other, right=ast.IntLiteral(
-                value=shift, location=const.location),
-                location=expr.location)
+                return _binop("+", other, other)
+            return _binop("<<", other, make_int_lit(shift))
 
         return None
 
@@ -653,7 +654,7 @@ class ASTOptimizer:
         result type back to `int`, mis-driving downstream code paths
         (sign-extension, comparison signedness, etc.).
         """
-        op = expr.op
+        op = _op(expr)
         left = expr.left
         right = expr.right
 
@@ -710,7 +711,7 @@ class ASTOptimizer:
             if r_one and not self._expr_has_side_effects(left):
                 self._stat("identity")
                 self._changed = True
-                return ast.IntLiteral(value=0, location=expr.location)
+                return make_int_lit(0)
         elif op in ("<<", ">>"):
             if r_zero:
                 result = left
@@ -740,7 +741,7 @@ class ASTOptimizer:
         `0 % a++` must still increment a, so the simplification is unsafe
         unless we can drop the other side without losing side effects.
         """
-        op = expr.op
+        op = _op(expr)
         left = expr.left
         right = expr.right
 
@@ -753,24 +754,24 @@ class ASTOptimizer:
             if (r_zero and l_pure) or (l_zero and r_pure):
                 self._stat("zero_element")
                 self._changed = True
-                return ast.IntLiteral(value=0, location=expr.location)
+                return make_int_lit(0)
         elif op == "&":
             if (r_zero and l_pure) or (l_zero and r_pure):
                 self._stat("zero_element")
                 self._changed = True
-                return ast.IntLiteral(value=0, location=expr.location)
+                return make_int_lit(0)
         elif op == "/" and l_zero and r_pure:
             self._stat("zero_element")
             self._changed = True
-            return ast.IntLiteral(value=0, location=expr.location)
+            return make_int_lit(0)
         elif op == "%" and l_zero and r_pure:
             self._stat("zero_element")
             self._changed = True
-            return ast.IntLiteral(value=0, location=expr.location)
+            return make_int_lit(0)
         elif op in ("<<", ">>") and l_zero and r_pure:
             self._stat("zero_element")
             self._changed = True
-            return ast.IntLiteral(value=0, location=expr.location)
+            return make_int_lit(0)
 
         return None
 
@@ -783,7 +784,7 @@ class ASTOptimizer:
         - (long long)x | 0xFFFF ≠ 0xFFFF  (loses upper bits)
         Only apply when the other operand is a non-long IntLiteral.
         """
-        op = expr.op
+        op = _op(expr)
         left = expr.left
         right = expr.right
 
@@ -810,32 +811,32 @@ class ASTOptimizer:
             if r_full and l_safe_16:
                 self._stat("full_mask")
                 self._changed = True
-                return ast.IntLiteral(value=0xFFFF, location=expr.location)
+                return make_int_lit(0xFFFF)
             if l_full and r_safe_16:
                 self._stat("full_mask")
                 self._changed = True
-                return ast.IntLiteral(value=0xFFFF, location=expr.location)
+                return make_int_lit(0xFFFF)
         elif op == "^":
             # x ^ 0xFFFF → ~x (only when x is 16-bit)
             if r_full and l_safe_16:
                 self._stat("full_mask")
                 self._changed = True
-                return ast.UnaryOp(op="~", operand=left, location=expr.location)
+                return _unop("~", left)
             if l_full and r_safe_16:
                 self._stat("full_mask")
                 self._changed = True
-                return ast.UnaryOp(op="~", operand=right, location=expr.location)
+                return _unop("~", right)
 
         return None
 
     def _simplify_idempotent(self, expr: ast.BinaryOp) -> ast.Expression | None:
         """Simplify idempotent boolean patterns: (a & b) & b → a & b, etc."""
-        op = expr.op
+        op = _op(expr)
         left = expr.left
         right = expr.right
 
         # (a OP b) OP b → a OP b   (for & and |)
-        if op in ("&", "|") and isinstance(left, ast.BinaryOp) and left.op == op:
+        if op in ("&", "|") and isinstance(left, ast.BinaryOp) and _op(left) == op:
             if self._is_same_identifier(right, left.right):
                 self._stat("idempotent")
                 self._changed = True
@@ -851,7 +852,7 @@ class ASTOptimizer:
 
     def _nested_const_fold(self, expr: ast.BinaryOp) -> ast.Expression | None:
         """Fold nested constants: (x + c1) + c2 → x + (c1+c2), etc."""
-        op = expr.op
+        op = _op(expr)
         right = expr.right
         left = expr.left
 
@@ -861,7 +862,7 @@ class ASTOptimizer:
         c2 = _iv(right)
 
         if isinstance(left, ast.BinaryOp) and isinstance(left.right, ast.IntLiteral):
-            inner_op = left.op
+            inner_op = _op(left)
             c1 = _iv(left.right)
             x = left.left
             # Use wider mask of the two constants
@@ -874,13 +875,7 @@ class ASTOptimizer:
             mask = max(self._literal_mask(right), self._literal_mask(left.right))
 
             def _new(val: int) -> ast.IntLiteral:
-                return ast.IntLiteral(
-                    value=val,
-                    is_long=is_long,
-                    is_long_long=is_long_long,
-                    is_unsigned=is_unsigned,
-                    location=right.location,
-                )
+                return make_int_lit(val)
 
             # (x + c1) + c2 → x + (c1 + c2)
             if op == "+" and inner_op == "+":
@@ -891,8 +886,7 @@ class ASTOptimizer:
                     combined -= (mask + 1)
                 self._stat("nested_fold")
                 self._changed = True
-                return ast.BinaryOp(op="+", left=x, right=_new(combined),
-                    location=expr.location)
+                return _binop("+", x, _new(combined))
 
             # (x - c1) + c2 → x + (c2 - c1)
             if op == "+" and inner_op == "-":
@@ -904,8 +898,7 @@ class ASTOptimizer:
                 self._changed = True
                 if combined == 0:
                     return x
-                return ast.BinaryOp(op="+", left=x, right=_new(combined),
-                    location=expr.location)
+                return _binop("+", x, _new(combined))
 
             # (x + c1) - c2 → x + (c1 - c2)
             if op == "-" and inner_op == "+":
@@ -917,42 +910,35 @@ class ASTOptimizer:
                 self._changed = True
                 if combined == 0:
                     return x
-                return ast.BinaryOp(op="+", left=x, right=_new(combined),
-                    location=expr.location)
+                return _binop("+", x, _new(combined))
 
             # (x - c1) - c2 → x - (c1 + c2)
             if op == "-" and inner_op == "-":
                 combined = (c1 + c2) & mask
                 self._stat("nested_fold")
                 self._changed = True
-                return ast.BinaryOp(op="-", left=x, right=_new(combined),
-                    location=expr.location)
+                return _binop("-", x, _new(combined))
 
             # (x * c1) * c2 → x * (c1 * c2)
             if op == "*" and inner_op == "*":
                 combined = (c1 * c2) & mask
                 self._stat("nested_fold")
                 self._changed = True
-                return ast.BinaryOp(op="*", left=x, right=_new(combined),
-                    location=expr.location)
+                return _binop("*", x, _new(combined))
 
             # (x << c1) << c2 → x << (c1 + c2)
             if op == "<<" and inner_op == "<<":
                 combined = c1 + c2
                 self._stat("nested_fold")
                 self._changed = True
-                return ast.BinaryOp(op="<<", left=x, right=ast.IntLiteral(
-                    value=combined, location=right.location),
-                    location=expr.location)
+                return _binop("<<", x, make_int_lit(combined))
 
             # (x >> c1) >> c2 → x >> (c1 + c2)
             if op == ">>" and inner_op == ">>":
                 combined = c1 + c2
                 self._stat("nested_fold")
                 self._changed = True
-                return ast.BinaryOp(op=">>", left=x, right=ast.IntLiteral(
-                    value=combined, location=right.location),
-                    location=expr.location)
+                return _binop(">>", x, make_int_lit(combined))
 
         return None
 
@@ -968,7 +954,7 @@ class ASTOptimizer:
 
     def _collect_address_taken(self, node) -> None:
         """Pre-pass: find all variables whose address is taken (&var)."""
-        if isinstance(node, ast.UnaryOp) and node.op == "&":
+        if isinstance(node, ast.UnaryOp) and _op(node) == "&":
             if isinstance(node.operand, ast.Identifier):
                 self._address_taken_vars.add(node.operand.name)
         # Recurse into children
@@ -1046,21 +1032,21 @@ class ASTOptimizer:
             return f"ID:{expr.name.text}"
         if isinstance(expr, ast.BinaryOp):
             # Skip assignment and short-circuit ops
-            if expr.op in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
+            if _op(expr) in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
                            "^=", "<<=", ">>=", "&&", "||", ","):
                 return None
             lk = ASTOptimizer._expr_key(expr.left)
             rk = ASTOptimizer._expr_key(expr.right)
             if lk is None or rk is None:
                 return None
-            return f"BIN:{expr.op}:{lk}:{rk}"
+            return f"BIN:{_op(expr)}:{lk}:{rk}"
         if isinstance(expr, ast.UnaryOp):
-            if expr.op in ("++", "--", "*", "&"):
+            if _op(expr) in ("++", "--", "*", "&"):
                 return None  # side effects or pointer deref
             ok = ASTOptimizer._expr_key(expr.operand)
             if ok is None:
                 return None
-            return f"UNA:{expr.op}:{ok}"
+            return f"UNA:{_op(expr)}:{ok}"
         if isinstance(expr, ast.Cast):
             ek = ASTOptimizer._expr_key(expr.expr)
             if ek is None:
@@ -1117,11 +1103,11 @@ class ASTOptimizer:
         if isinstance(expr, ast.VaArgExpr):
             return True
         if isinstance(expr, ast.UnaryOp):
-            if expr.op in ("++", "--"):
+            if _op(expr) in ("++", "--"):
                 return True
             return ASTOptimizer._expr_has_side_effects(expr.operand)
         if isinstance(expr, ast.BinaryOp):
-            if expr.op in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
+            if _op(expr) in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
                            "^=", "<<=", ">>="):
                 return True
             return (ASTOptimizer._expr_has_side_effects(expr.left) or
@@ -1163,7 +1149,7 @@ class ASTOptimizer:
         call? Used by the dead-store eliminator to bail when the
         second store's RHS could observe the first via aliasing.
         """
-        if isinstance(expr, ast.UnaryOp) and expr.op == "*":
+        if isinstance(expr, ast.UnaryOp) and _op(expr) == "*":
             return True
         if isinstance(expr, ast.Member) and expr.is_arrow:
             return True
@@ -1224,14 +1210,14 @@ class ASTOptimizer:
         """Collect all variable names modified (assigned, incremented) in an expression."""
         result: set[str] = set()
         if isinstance(expr, ast.BinaryOp):
-            if expr.op in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
+            if _op(expr) in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
                            "^=", "<<=", ">>="):
                 if isinstance(expr.left, ast.Identifier):
                     result.add(expr.left.name)
             result.update(self._get_modified_vars_in_expr(expr.left))
             result.update(self._get_modified_vars_in_expr(expr.right))
         elif isinstance(expr, ast.UnaryOp):
-            if expr.op in ("++", "--"):
+            if _op(expr) in ("++", "--"):
                 if isinstance(expr.operand, ast.Identifier):
                     result.add(expr.operand.name)
             result.update(self._get_modified_vars_in_expr(expr.operand))
@@ -1363,12 +1349,12 @@ class ASTOptimizer:
         Order: Identifier < Complex < IntLiteral.
         This ensures a+5 and 5+a get the same CSE key.
         """
-        if expr.op not in ("+", "*", "&", "|", "^", "==", "!="):
+        if _op(expr) not in ("+", "*", "&", "|", "^", "==", "!="):
             return None
 
         def sort_key(e: ast.Expression) -> tuple:
             if isinstance(e, ast.Identifier):
-                return (0, e.name)
+                return (0, e.name.text)
             if isinstance(e, ast.IntLiteral):
                 return (2, _iv(e))
             if isinstance(e, ast.CharLiteral):
@@ -1447,14 +1433,14 @@ class ASTOptimizer:
     def _invalidate_caches_for_expr(self, expr: ast.Expression) -> None:
         """Invalidate CSE/copy caches based on side effects in an expression."""
         if isinstance(expr, ast.BinaryOp):
-            if expr.op in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
+            if _op(expr) in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
                            "^=", "<<=", ">>="):
                 if isinstance(expr.left, ast.Identifier):
                     name = expr.left.name
                     self._invalidate_cse_for_var(name)
                     self._invalidate_copies_for_var(name)
                     # Track simple copy: x = y (only if types are compatible)
-                    if expr.op == "=" and isinstance(expr.right, ast.Identifier):
+                    if _op(expr) == "=" and isinstance(expr.right, ast.Identifier):
                         if self._types_compatible_for_copy(name, expr.right.name):
                             self._copies[name] = expr.right.name
                 elif isinstance(expr.left, (ast.UnaryOp, ast.Index)):
@@ -1464,7 +1450,7 @@ class ASTOptimizer:
             self._invalidate_caches_for_expr(expr.left)
             self._invalidate_caches_for_expr(expr.right)
         elif isinstance(expr, ast.UnaryOp):
-            if expr.op in ("++", "--"):
+            if _op(expr) in ("++", "--"):
                 if isinstance(expr.operand, ast.Identifier):
                     self._invalidate_cse_for_var(expr.operand.name)
                     self._invalidate_copies_for_var(expr.operand.name)
@@ -1574,7 +1560,7 @@ class ASTOptimizer:
         if not isinstance(item, ast.ExpressionStmt):
             return None
         expr = item.expr
-        if not isinstance(expr, ast.BinaryOp) or expr.op != "=":
+        if not isinstance(expr, ast.BinaryOp) or _op(expr) != "=":
             return None
         if isinstance(expr.left, ast.Identifier):
             return expr.left.name
@@ -1586,7 +1572,7 @@ class ASTOptimizer:
         if not isinstance(item, ast.ExpressionStmt):
             return None
         expr = item.expr
-        if not isinstance(expr, ast.BinaryOp) or expr.op != "=":
+        if not isinstance(expr, ast.BinaryOp) or _op(expr) != "=":
             return None
         return expr.right
 
@@ -1600,7 +1586,7 @@ class ASTOptimizer:
         update = stmt.update
 
         # Check init: var = const
-        if not isinstance(init, ast.BinaryOp) or init.op != "=":
+        if not isinstance(init, ast.BinaryOp) or _op(init) != "=":
             return None
         if not isinstance(init.left, ast.Identifier):
             return None
@@ -1617,13 +1603,13 @@ class ASTOptimizer:
         if not isinstance(cond.right, ast.IntLiteral):
             return None
         end_val = _iv(cond.right)
-        cmp_op = cond.op
+        cmp_op = _op(cond)
 
         # Check update: var++ or var += 1
         step = None
-        if isinstance(update, ast.UnaryOp) and update.op == "++" and isinstance(update.operand, ast.Identifier) and update.operand.name == var_name:
+        if isinstance(update, ast.UnaryOp) and _op(update) == "++" and isinstance(update.operand, ast.Identifier) and update.operand.name == var_name:
             step = 1
-        elif isinstance(update, ast.BinaryOp) and update.op == "+=" and isinstance(update.left, ast.Identifier) and update.left.name == var_name and isinstance(update.right, ast.IntLiteral):
+        elif isinstance(update, ast.BinaryOp) and _op(update) == "+=" and isinstance(update.left, ast.Identifier) and update.left.name == var_name and isinstance(update.right, ast.IntLiteral):
             step = _iv(update.right)
         if step is None or step <= 0:
             return None
@@ -1662,21 +1648,16 @@ class ASTOptimizer:
         for i in range(iterations):
             val = start_val + i * step
             # var = val
+            # var_name is the induction variable's Token (init.left.name).
             assign = ast.ExpressionStmt(
-                expr=ast.BinaryOp(
-                    op="=",
-                    left=ast.Identifier(name=var_name, location=stmt.location),
-                    right=ast.IntLiteral(value=val, location=stmt.location),
-                    location=stmt.location,
-                ),
-                location=stmt.location,
+                expr=_binop("=", ast.Identifier(name=var_name), make_int_lit(val)),
             )
             items.append(assign)
             # Deep copy of body statements
             for s in body_stmts:
                 items.append(copy.deepcopy(s))
 
-        return ast.CompoundStmt(items=items, location=stmt.location)
+        return ast.CompoundStmt(items=items)
 
     @staticmethod
     def _get_flat_stmts(body) -> list | None:
