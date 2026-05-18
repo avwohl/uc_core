@@ -47,6 +47,14 @@ def _op(node) -> str:
     return o.text if hasattr(o, "text") else o
 
 
+def _idname(ident) -> str:
+    """Name text of an Identifier. The auto-AST stores `.name` as a
+    Token; the optimizer keys its dataflow tables (copy/CSE/var-type/
+    address-taken) by str, so normalize here. Tolerates a bare str."""
+    n = ident.name
+    return n.text if hasattr(n, "text") else n
+
+
 def _optok(text: str) -> Token:
     """Synthetic operator/punctuator Token for an optimizer-minted node."""
     return Token(name="OP", text=text, line=0, column=0, offset=0, file_id=0)
@@ -178,8 +186,9 @@ class ASTOptimizer:
                     self._invalidate_caches_for_stmt(item)
 
                 # Check if this statement is a terminator
-                if isinstance(item, (ast.ReturnStmt, ast.GotoStmt,
-                                     ast.BreakStmt, ast.ContinueStmt)):
+                if isinstance(item, (ast.ReturnStmt, ast.ReturnStmtValue,
+                                     ast.GotoStmt, ast.BreakStmt,
+                                     ast.ContinueStmt)):
                     unreachable = True
             if len(new_items) != len(stmt.items):
                 stmt.items = new_items
@@ -333,10 +342,11 @@ class ASTOptimizer:
         """Recursively optimize an expression bottom-up."""
         # Level 3: copy propagation on identifiers
         if self.opt_level >= 3 and isinstance(expr, ast.Identifier):
-            if expr.name in self._copies:
+            nm = _idname(expr)
+            if nm in self._copies:
                 self._stat("copy_prop")
                 self._changed = True
-                return make_identifier(self._copies[expr.name])
+                return make_identifier(self._copies[nm])
 
         if isinstance(expr, ast.BinaryOp):
             # For assignments, protect LHS from copy propagation
@@ -963,7 +973,7 @@ class ASTOptimizer:
         """Pre-pass: find all variables whose address is taken (&var)."""
         if isinstance(node, ast.UnaryOp) and _op(node) == "&":
             if isinstance(node.operand, ast.Identifier):
-                self._address_taken_vars.add(node.operand.name)
+                self._address_taken_vars.add(_idname(node.operand))
         # Recurse into children
         if isinstance(node, ast.CompoundStmt):
             for item in node.items:
@@ -1020,12 +1030,10 @@ class ASTOptimizer:
             self._collect_address_taken(node.index)
         elif isinstance(node, ast.Cast):
             self._collect_address_taken(node.expr)
-        elif isinstance(node, ast.VarDecl):
-            if node.init is not None:
-                self._collect_address_taken(node.init)
-        elif isinstance(node, ast.DeclarationList):
-            for d in node.declarations:
-                self._collect_address_taken(d)
+        elif isinstance(node, ast.Declaration):
+            for d in node.declarators or []:
+                if isinstance(d, ast.InitDeclaratorWithInit):
+                    self._collect_address_taken(d.init)
 
     @staticmethod
     def _expr_key(expr: ast.Expression) -> str | None:
@@ -1075,7 +1083,7 @@ class ASTOptimizer:
         """Get all variable names referenced in an expression tree."""
         result: set[str] = set()
         if isinstance(expr, ast.Identifier):
-            result.add(expr.name)
+            result.add(_idname(expr))
         elif isinstance(expr, ast.BinaryOp):
             result.update(ASTOptimizer._get_expr_vars(expr.left))
             result.update(ASTOptimizer._get_expr_vars(expr.right))
@@ -1189,7 +1197,7 @@ class ASTOptimizer:
     def _expr_references_var(expr: ast.Expression, name: str) -> bool:
         """Check if expression tree references a variable by name."""
         if isinstance(expr, ast.Identifier):
-            return expr.name == name
+            return _idname(expr) == name
         if isinstance(expr, ast.BinaryOp):
             return (ASTOptimizer._expr_references_var(expr.left, name) or
                     ASTOptimizer._expr_references_var(expr.right, name))
@@ -1219,13 +1227,13 @@ class ASTOptimizer:
             if _op(expr) in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
                            "^=", "<<=", ">>="):
                 if isinstance(expr.left, ast.Identifier):
-                    result.add(expr.left.name)
+                    result.add(_idname(expr.left))
             result.update(self._get_modified_vars_in_expr(expr.left))
             result.update(self._get_modified_vars_in_expr(expr.right))
         elif isinstance(expr, ast.UnaryOp):
             if _op(expr) in ("++", "--"):
                 if isinstance(expr.operand, ast.Identifier):
-                    result.add(expr.operand.name)
+                    result.add(_idname(expr.operand))
             result.update(self._get_modified_vars_in_expr(expr.operand))
         elif isinstance(expr, ast.TernaryOp):
             result.update(self._get_modified_vars_in_expr(expr.condition))
@@ -1426,22 +1434,26 @@ class ASTOptimizer:
 
         if isinstance(item, ast.ExpressionStmt) and item.expr is not None:
             self._invalidate_caches_for_expr(item.expr)
-        elif isinstance(item, ast.VarDecl) and item.init is not None:
-            # Variable declaration with init: x is assigned
-            self._invalidate_cse_for_var(item.name)
-            self._invalidate_copies_for_var(item.name)
-            # Track variable type
-            if item.var_type is not None:
-                self._var_types[item.name] = item.var_type
-            # Track copy: if init is simple identifier with compatible type
-            if isinstance(item.init, ast.Identifier):
-                if self._types_compatible_for_copy(item.name, item.init.name):
-                    self._copies[item.name] = item.init.name
+        elif isinstance(item, ast.Declaration):
+            # Each initialized declarator assigns its variable.
+            for d in item.declarators or []:
+                if not isinstance(d, ast.InitDeclaratorWithInit):
+                    continue
+                nm = _declarator_ident(d.declarator)
+                if nm is None:
+                    continue
+                self._invalidate_cse_for_var(nm)
+                self._invalidate_copies_for_var(nm)
+                # Track copy `x = y` when the types are compatible.
+                if isinstance(d.init, ast.Identifier):
+                    src = _idname(d.init)
+                    if self._types_compatible_for_copy(nm, src):
+                        self._copies[nm] = src
         elif isinstance(item, (ast.IfStmt, ast.IfStmtElse, ast.WhileStmt,
                                ast.DoWhileStmt, ast.ForStmt, ast.SwitchStmt)):
             # Control flow structures: conservatively clear caches
             self._clear_all_caches()
-        elif isinstance(item, (ast.ReturnStmt, ast.GotoStmt)):
+        elif isinstance(item, (ast.ReturnStmt, ast.ReturnStmtValue, ast.GotoStmt)):
             self._clear_all_caches()
 
     def _invalidate_caches_for_expr(self, expr: ast.Expression) -> None:
@@ -1450,13 +1462,13 @@ class ASTOptimizer:
             if _op(expr) in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
                            "^=", "<<=", ">>="):
                 if isinstance(expr.left, ast.Identifier):
-                    name = expr.left.name
+                    name = _idname(expr.left)
                     self._invalidate_cse_for_var(name)
                     self._invalidate_copies_for_var(name)
                     # Track simple copy: x = y (only if types are compatible)
                     if _op(expr) == "=" and isinstance(expr.right, ast.Identifier):
-                        if self._types_compatible_for_copy(name, expr.right.name):
-                            self._copies[name] = expr.right.name
+                        if self._types_compatible_for_copy(name, _idname(expr.right)):
+                            self._copies[name] = _idname(expr.right)
                 elif isinstance(expr.left, (ast.UnaryOp, ast.Index)):
                     # Pointer/array write: clear all caches
                     self._clear_all_caches()
@@ -1466,8 +1478,8 @@ class ASTOptimizer:
         elif isinstance(expr, ast.UnaryOp):
             if _op(expr) in ("++", "--"):
                 if isinstance(expr.operand, ast.Identifier):
-                    self._invalidate_cse_for_var(expr.operand.name)
-                    self._invalidate_copies_for_var(expr.operand.name)
+                    self._invalidate_cse_for_var(_idname(expr.operand))
+                    self._invalidate_copies_for_var(_idname(expr.operand))
                 else:
                     # Pointer increment etc.
                     self._clear_all_caches()
@@ -1577,7 +1589,7 @@ class ASTOptimizer:
         if not isinstance(expr, ast.BinaryOp) or _op(expr) != "=":
             return None
         if isinstance(expr.left, ast.Identifier):
-            return expr.left.name
+            return _idname(expr.left)
         return None
 
     @staticmethod
@@ -1606,13 +1618,13 @@ class ASTOptimizer:
             return None
         if not isinstance(init.right, ast.IntLiteral):
             return None
-        var_name = init.left.name
+        var_name = _idname(init.left)
         start_val = _iv(init.right)
 
         # Check condition: var < const, var <= const, var != const
         if not isinstance(cond, ast.BinaryOp):
             return None
-        if not isinstance(cond.left, ast.Identifier) or cond.left.name != var_name:
+        if not isinstance(cond.left, ast.Identifier) or _idname(cond.left) != var_name:
             return None
         if not isinstance(cond.right, ast.IntLiteral):
             return None
@@ -1621,9 +1633,9 @@ class ASTOptimizer:
 
         # Check update: var++ or var += 1
         step = None
-        if isinstance(update, ast.UnaryOp) and _op(update) == "++" and isinstance(update.operand, ast.Identifier) and update.operand.name == var_name:
+        if isinstance(update, ast.UnaryOp) and _op(update) == "++" and isinstance(update.operand, ast.Identifier) and _idname(update.operand) == var_name:
             step = 1
-        elif isinstance(update, ast.BinaryOp) and _op(update) == "+=" and isinstance(update.left, ast.Identifier) and update.left.name == var_name and isinstance(update.right, ast.IntLiteral):
+        elif isinstance(update, ast.BinaryOp) and _op(update) == "+=" and isinstance(update.left, ast.Identifier) and _idname(update.left) == var_name and isinstance(update.right, ast.IntLiteral):
             step = _iv(update.right)
         if step is None or step <= 0:
             return None
@@ -1662,9 +1674,9 @@ class ASTOptimizer:
         for i in range(iterations):
             val = start_val + i * step
             # var = val
-            # var_name is the induction variable's Token (init.left.name).
+            # var_name is the induction variable's name (str via _idname).
             assign = ast.ExpressionStmt(
-                expr=_binop("=", ast.Identifier(name=var_name), make_int_lit(val)),
+                expr=_binop("=", make_identifier(var_name), make_int_lit(val)),
             )
             items.append(assign)
             # Deep copy of body statements
@@ -1728,7 +1740,7 @@ class ASTOptimizer:
     def _is_same_identifier(a: ast.Expression, b: ast.Expression) -> bool:
         """Check if two expressions are the same simple identifier."""
         return (isinstance(a, ast.Identifier) and isinstance(b, ast.Identifier)
-                and a.name == b.name)
+                and _idname(a) == _idname(b))
 
     @staticmethod
     def _is_unsigned_literal(*exprs: ast.Expression) -> bool:

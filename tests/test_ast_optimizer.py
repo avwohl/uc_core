@@ -92,7 +92,27 @@ def _only_function_body(unit):
     return fns[0].body
 
 
-_XFAIL = "ASTOptimizer not yet migrated to auto-AST (statement dispatch dead); enable when the relevant phase lands and delete this marker"
+# Phases 0-3 are done: node construction, operator/identifier accessors,
+# statement dispatch, and the ReturnStmt/ReturnStmtValue split are all
+# migrated. The three transforms below stay xfail(strict) because each
+# is blocked by a *distinct, non-mechanical* gap (a follow-up unit of
+# work, not auto-AST migration). strict=True still flags any change.
+_XFAIL_COPY = (
+    "blocked: copy-prop's _types_compatible_for_copy needs resolved "
+    "type categories, but the Phase-6 auto-AST carries no resolved "
+    "types (_var_types is None), so the guard always refuses. Needs a "
+    "declarator-shaped type-category derivation (separate work)."
+)
+_XFAIL_DEADSTORE = (
+    "blocked: _eliminate_dead_stores only treats assignment statements "
+    "as stores, not declaration initializers (`int x = 1;`). Needs "
+    "declaration-initializer-aware dead-store analysis (separate work)."
+)
+_XFAIL_UNROLL = (
+    "blocked: _try_loop_unroll only matches expression-form for-init "
+    "(`for(i=0;..)`); the idiomatic `for(int i=0;..)` has a Declaration "
+    "init it doesn't handle. Needs decl-form for-init support (separate work)."
+)
 
 
 # A spread of real-ish C the optimizer must survive without raising.
@@ -195,8 +215,9 @@ def test_dce_if_false_no_else_is_removed():
     assert 10 not in _int_literals(_only_function_body(unit))
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_unreachable_after_return_removed():
+    # Enabled by Phase 3: the terminator check now recognizes
+    # ReturnStmtValue (the value-bearing return node-split variant).
     unit = _optimize("int f(void){ int x = 0; return 1; x = 2; return x; }")
     body = _only_function_body(unit)
     assert 2 not in _int_literals(body)
@@ -208,7 +229,7 @@ def test_unreachable_after_return_removed():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
+@pytest.mark.xfail(reason=_XFAIL_COPY, strict=True)
 def test_copy_propagation():
     # int a = p; int b = a + a;  ->  b computed from p, `a` propagated away.
     unit = _optimize("int h(int p){ int a = p; int b = a + a; return b; }")
@@ -216,14 +237,14 @@ def test_copy_propagation():
     assert "a" not in idents
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
+@pytest.mark.xfail(reason=_XFAIL_DEADSTORE, strict=True)
 def test_dead_store_elimination():
     # x = 1; is dead (overwritten before any use); the 1 must disappear.
     unit = _optimize("int f(void){ int x = 1; x = 2; return x; }")
     assert 1 not in _int_literals(_only_function_body(unit))
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
+@pytest.mark.xfail(reason=_XFAIL_UNROLL, strict=True)
 def test_small_constant_loop_is_unrolled():
     unit = _optimize("int f(void){ int s = 0; for (int i = 0; i < 3; i++) s += i; return s; }")
     assert _find(_only_function_body(unit), "ForStmt") == []
