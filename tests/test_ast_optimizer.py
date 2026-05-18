@@ -154,21 +154,18 @@ def test_fold_constant_initializer():
     assert isinstance(init, ast.IntLiteral) and int_value(init) == 14
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_fold_constant_return_value():
     unit = _optimize("int f(void){ return 7 * 6; }")
     val = _find(unit, "ReturnStmtValue")[0].value
     assert isinstance(val, ast.IntLiteral) and int_value(val) == 42
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_fold_constant_comparison():
     unit = _optimize("int f(void){ return 5 > 3; }")
     val = _find(unit, "ReturnStmtValue")[0].value
     assert isinstance(val, ast.IntLiteral) and int_value(val) == 1
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_fold_shift():
     unit = _optimize("int f(void){ return 1 << 4; }")
     val = _find(unit, "ReturnStmtValue")[0].value
@@ -180,7 +177,6 @@ def test_fold_shift():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_dce_if_true_drops_else():
     # if (1) x = 10; else x = 99;  ->  the 99 store must be gone.
     unit = _optimize("int g(void){ int x = 0; if (1) x = 10; else x = 99; return x; }")
@@ -188,14 +184,12 @@ def test_dce_if_true_drops_else():
     assert 99 not in lits and 10 in lits
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_dce_if_false_keeps_else():
     unit = _optimize("int g(void){ int x = 0; if (0) x = 10; else x = 99; return x; }")
     lits = _int_literals(_only_function_body(unit))
     assert 10 not in lits and 99 in lits
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_dce_if_false_no_else_is_removed():
     unit = _optimize("int g(void){ int x = 0; if (0) x = 10; return x; }")
     assert 10 not in _int_literals(_only_function_body(unit))
@@ -240,21 +234,18 @@ def test_small_constant_loop_is_unrolled():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_strength_reduce_mul_by_power_of_two():
     unit = _optimize("int m(int x){ return x * 8; }")
     ops = {getattr(b.op, "text", b.op) for b in _find(unit, "BinaryOp")}
     assert "<<" in ops and "*" not in ops
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_algebraic_add_zero():
     unit = _optimize("int f(int x){ return x + 0; }")
     val = _find(unit, "ReturnStmtValue")[0].value
     assert type(val).__name__ == "Identifier" and val.name.text == "x"
 
 
-@pytest.mark.xfail(reason=_XFAIL, strict=True)
 def test_algebraic_mul_zero():
     unit = _optimize("int f(int x){ return x * 0; }")
     val = _find(unit, "ReturnStmtValue")[0].value

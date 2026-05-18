@@ -143,10 +143,15 @@ class ASTOptimizer:
                     # Keep items that contain labels/cases (reachable via goto/switch)
                     if self._contains_label(item):
                         unreachable = False
-                        if isinstance(item, ast.Statement):
-                            self._optimize_stmt(item)
-                        elif isinstance(item, ast.Declaration):
+                        # ast.Statement/ast.Expression are _Removed
+                        # tombstones in the auto-AST; dispatch by the
+                        # one concrete category instead — a block item
+                        # is a declaration or (everything else) a
+                        # statement.
+                        if isinstance(item, (ast.Declaration, ast.FunctionDef)):
                             self._optimize_decl(item)
+                        else:
+                            self._optimize_stmt(item)
                         new_items.append(item)
                     else:
                         self._stat("dead_code")
@@ -162,10 +167,10 @@ class ASTOptimizer:
                         new_items.append(unrolled)
                         continue
 
-                if isinstance(item, ast.Statement):
-                    self._optimize_stmt(item)
-                elif isinstance(item, ast.Declaration):
+                if isinstance(item, (ast.Declaration, ast.FunctionDef)):
                     self._optimize_decl(item)
+                else:
+                    self._optimize_stmt(item)
                 new_items.append(item)
 
                 # Level 3: invalidate caches after processing statement
@@ -269,10 +274,10 @@ class ASTOptimizer:
 
         elif isinstance(stmt, ast.ForStmt):
             if stmt.init is not None:
-                if isinstance(stmt.init, ast.Expression):
-                    stmt.init = self._optimize_expr(stmt.init)
-                elif isinstance(stmt.init, ast.Declaration):
+                if isinstance(stmt.init, ast.Declaration):
                     self._optimize_decl(stmt.init)
+                else:
+                    stmt.init = self._optimize_expr(stmt.init)
             # Clear caches BEFORE condition / update — they re-evaluate
             # on subsequent iterations after the body has potentially
             # mutated state. Same shape as the WhileStmt fix.
@@ -404,8 +409,10 @@ class ASTOptimizer:
                 return make_int_lit(strlit_len + 1)
             return expr
         elif isinstance(expr, ast.InitializerList):
-            expr.values = [self._optimize_expr(v) if isinstance(v, ast.Expression) else v
-                           for v in expr.values]
+            # _optimize_expr is total: it returns non-expression nodes
+            # (nested InitializerList, designators) unchanged, so it is
+            # safe to map over every value here.
+            expr.values = [self._optimize_expr(v) for v in expr.values]
             return expr
         return expr
 
@@ -1137,9 +1144,8 @@ class ASTOptimizer:
                 if isinstance(v, ast.DesignatedInit):
                     if ASTOptimizer._expr_has_side_effects(v.value):
                         return True
-                elif isinstance(v, ast.Expression):
-                    if ASTOptimizer._expr_has_side_effects(v):
-                        return True
+                elif ASTOptimizer._expr_has_side_effects(v):
+                    return True
             return False
         return False
 
@@ -1240,15 +1246,14 @@ class ASTOptimizer:
         result: set[str] = set()
         if isinstance(stmt, ast.CompoundStmt):
             for item in stmt.items:
-                if isinstance(item, ast.Statement):
-                    result.update(self._get_modified_vars_in_stmt(item))
-                elif isinstance(item, ast.VarDecl):
-                    if item.init is not None:
-                        result.update(self._get_modified_vars_in_expr(item.init))
-                elif isinstance(item, ast.DeclarationList):
-                    for d in item.declarations:
-                        if isinstance(d, ast.VarDecl) and d.init is not None:
+                if isinstance(item, ast.Declaration):
+                    for d in item.declarators or []:
+                        if isinstance(d, ast.InitDeclaratorWithInit):
                             result.update(self._get_modified_vars_in_expr(d.init))
+                elif isinstance(item, ast.FunctionDef):
+                    pass  # nested function: separate scope
+                else:
+                    result.update(self._get_modified_vars_in_stmt(item))
         elif isinstance(stmt, ast.ExpressionStmt):
             if stmt.expr is not None:
                 result.update(self._get_modified_vars_in_expr(stmt.expr))
@@ -1266,7 +1271,11 @@ class ASTOptimizer:
             result.update(self._get_modified_vars_in_expr(stmt.condition))
         elif isinstance(stmt, ast.ForStmt):
             if stmt.init is not None:
-                if isinstance(stmt.init, ast.Expression):
+                if isinstance(stmt.init, ast.Declaration):
+                    for d in stmt.init.declarators or []:
+                        if isinstance(d, ast.InitDeclaratorWithInit):
+                            result.update(self._get_modified_vars_in_expr(d.init))
+                else:
                     result.update(self._get_modified_vars_in_expr(stmt.init))
             if stmt.condition is not None:
                 result.update(self._get_modified_vars_in_expr(stmt.condition))
@@ -1305,8 +1314,13 @@ class ASTOptimizer:
         if isinstance(stmt, ast.DoWhileStmt):
             return ASTOptimizer._stmt_has_calls(stmt.body) or ASTOptimizer._expr_has_calls(stmt.condition)
         if isinstance(stmt, ast.ForStmt):
-            if stmt.init and isinstance(stmt.init, ast.Expression) and ASTOptimizer._expr_has_calls(stmt.init):
-                return True
+            if stmt.init:
+                if isinstance(stmt.init, ast.Declaration):
+                    for d in stmt.init.declarators or []:
+                        if isinstance(d, ast.InitDeclaratorWithInit) and ASTOptimizer._expr_has_calls(d.init):
+                            return True
+                elif ASTOptimizer._expr_has_calls(stmt.init):
+                    return True
             if stmt.condition and ASTOptimizer._expr_has_calls(stmt.condition):
                 return True
             if stmt.update and ASTOptimizer._expr_has_calls(stmt.update):
@@ -1663,14 +1677,16 @@ class ASTOptimizer:
     def _get_flat_stmts(body) -> list | None:
         """Get flat list of statements from a loop body. Returns None if not flattenable."""
         if isinstance(body, ast.CompoundStmt):
-            # All items must be statements (no declarations)
+            # All items must be statements (no declarations) for the
+            # unroll to preserve scoping.
             result = []
             for item in body.items:
-                if not isinstance(item, ast.Statement):
+                if isinstance(item, (ast.Declaration, ast.FunctionDef)):
                     return None
                 result.append(item)
             return result
-        if isinstance(body, ast.Statement):
+        # A single non-compound, non-declaration statement body.
+        if not isinstance(body, (ast.Declaration, ast.FunctionDef)):
             return [body]
         return None
 
