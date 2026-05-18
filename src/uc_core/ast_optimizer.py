@@ -145,6 +145,7 @@ class ASTOptimizer:
     def _optimize_stmt(self, stmt: ast.Statement) -> None:
         if isinstance(stmt, ast.CompoundStmt):
             new_items: list = []
+            replaced = False  # a 1:1 substitution (e.g. loop unroll)
             unreachable = False
             for item in stmt.items:
                 if unreachable:
@@ -173,6 +174,7 @@ class ASTOptimizer:
                         # Unrolled into a CompoundStmt; optimize its contents
                         self._optimize_stmt(unrolled)
                         new_items.append(unrolled)
+                        replaced = True  # same length, must still write back
                         continue
 
                 if isinstance(item, (ast.Declaration, ast.FunctionDef)):
@@ -190,7 +192,7 @@ class ASTOptimizer:
                                      ast.GotoStmt, ast.BreakStmt,
                                      ast.ContinueStmt)):
                     unreachable = True
-            if len(new_items) != len(stmt.items):
+            if replaced or len(new_items) != len(stmt.items):
                 stmt.items = new_items
 
             # Level 3: dead store elimination on the final list
@@ -1611,15 +1613,32 @@ class ASTOptimizer:
         cond = stmt.condition
         update = stmt.update
 
-        # Check init: var = const
-        if not isinstance(init, ast.BinaryOp) or _op(init) != "=":
+        # Check init: `var = const` (expression form, var declared in an
+        # enclosing scope) or `T var = const;` (declaration form, var
+        # scoped to the loop — must be re-declared in the unrolled block).
+        init_decl = None
+        if isinstance(init, ast.BinaryOp) and _op(init) == "=":
+            if not isinstance(init.left, ast.Identifier):
+                return None
+            if not isinstance(init.right, ast.IntLiteral):
+                return None
+            var_name = _idname(init.left)
+            start_val = _iv(init.right)
+        elif isinstance(init, ast.Declaration):
+            with_init = [d for d in (init.declarators or [])
+                         if isinstance(d, ast.InitDeclaratorWithInit)]
+            if len(with_init) != 1:
+                return None  # 0 or multiple declarators: not a simple counter
+            d = with_init[0]
+            if not isinstance(d.init, ast.IntLiteral):
+                return None
+            var_name = _declarator_ident(d.declarator)
+            if var_name is None:
+                return None
+            start_val = _iv(d.init)
+            init_decl = init  # re-emit once so `var` stays declared
+        else:
             return None
-        if not isinstance(init.left, ast.Identifier):
-            return None
-        if not isinstance(init.right, ast.IntLiteral):
-            return None
-        var_name = _idname(init.left)
-        start_val = _iv(init.right)
 
         # Check condition: var < const, var <= const, var != const
         if not isinstance(cond, ast.BinaryOp):
@@ -1631,9 +1650,11 @@ class ASTOptimizer:
         end_val = _iv(cond.right)
         cmp_op = _op(cond)
 
-        # Check update: var++ or var += 1
+        # Check update: var++ / ++var (UnaryOp prefix or PostfixOp) or
+        # var += 1. The auto-AST splits postfix `i++` into PostfixOp;
+        # both it and prefix UnaryOp carry .op (Token) and .operand.
         step = None
-        if isinstance(update, ast.UnaryOp) and _op(update) == "++" and isinstance(update.operand, ast.Identifier) and _idname(update.operand) == var_name:
+        if isinstance(update, (ast.UnaryOp, ast.PostfixOp)) and _op(update) == "++" and isinstance(update.operand, ast.Identifier) and _idname(update.operand) == var_name:
             step = 1
         elif isinstance(update, ast.BinaryOp) and _op(update) == "+=" and isinstance(update.left, ast.Identifier) and _idname(update.left) == var_name and isinstance(update.right, ast.IntLiteral):
             step = _iv(update.right)
@@ -1671,6 +1692,11 @@ class ASTOptimizer:
         self._changed = True
 
         items: list = []
+        if init_decl is not None:
+            # Keep the loop variable declared (and scoped to this block)
+            # in the declaration-form case; the per-iteration `var = val`
+            # assignments below overwrite its initializer.
+            items.append(copy.deepcopy(init_decl))
         for i in range(iterations):
             val = start_val + i * step
             # var = val

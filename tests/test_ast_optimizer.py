@@ -108,11 +108,6 @@ _XFAIL_DEADSTORE = (
     "as stores, not declaration initializers (`int x = 1;`). Needs "
     "declaration-initializer-aware dead-store analysis (separate work)."
 )
-_XFAIL_UNROLL = (
-    "blocked: _try_loop_unroll only matches expression-form for-init "
-    "(`for(i=0;..)`); the idiomatic `for(int i=0;..)` has a Declaration "
-    "init it doesn't handle. Needs decl-form for-init support (separate work)."
-)
 
 
 # A spread of real-ish C the optimizer must survive without raising.
@@ -244,8 +239,10 @@ def test_dead_store_elimination():
     assert 1 not in _int_literals(_only_function_body(unit))
 
 
-@pytest.mark.xfail(reason=_XFAIL_UNROLL, strict=True)
 def test_small_constant_loop_is_unrolled():
+    # Enabled by the decl-form follow-up: _try_loop_unroll now also
+    # accepts `for(int i=0;..)` (Declaration init), re-declaring the
+    # loop variable in the unrolled block to preserve scoping.
     unit = _optimize("int f(void){ int s = 0; for (int i = 0; i < 3; i++) s += i; return s; }")
     assert _find(_only_function_body(unit), "ForStmt") == []
 
