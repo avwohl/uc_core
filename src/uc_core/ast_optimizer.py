@@ -159,31 +159,41 @@ class ASTOptimizer:
             if stmt.expr is not None:
                 stmt.expr = self._optimize_expr(stmt.expr)
 
-        elif isinstance(stmt, ast.IfStmt):
+        elif isinstance(stmt, (ast.IfStmt, ast.IfStmtElse)):
+            # The c23 grammar emits two distinct nodes: `IfStmt`
+            # (no else, fields condition/then_branch) and
+            # `IfStmtElse` (adds else_branch). Read the else via
+            # getattr so a plain IfStmt is uniformly "no else", and
+            # only write `.else_branch` back when the attribute
+            # actually exists (IfStmtElse).
+            has_else_attr = hasattr(stmt, "else_branch")
             stmt.condition = self._optimize_expr(stmt.condition)
+            else_b = getattr(stmt, "else_branch", None)
             # Constant condition → dead code elimination
             # But only if eliminated branches don't contain labels (goto targets)
             if isinstance(stmt.condition, ast.IntLiteral):
                 if _iv(stmt.condition) != 0:
                     # Always true: eliminate else if it has no labels
                     self._optimize_stmt(stmt.then_branch)
-                    if stmt.else_branch is not None:
-                        if not self._contains_label(stmt.else_branch):
+                    if else_b is not None:
+                        if not self._contains_label(else_b):
                             self._stat("dead_code")
                             self._changed = True
-                            stmt.else_branch = None
+                            if has_else_attr:
+                                stmt.else_branch = None
                         else:
-                            self._optimize_stmt(stmt.else_branch)
+                            self._optimize_stmt(else_b)
                 else:
                     # Always false
                     then_has_labels = self._contains_label(stmt.then_branch)
                     if not then_has_labels:
                         self._stat("dead_code")
                         self._changed = True
-                        if stmt.else_branch is not None:
-                            self._optimize_stmt(stmt.else_branch)
-                            stmt.then_branch = stmt.else_branch
-                            stmt.else_branch = None
+                        if else_b is not None:
+                            self._optimize_stmt(else_b)
+                            stmt.then_branch = else_b
+                            if has_else_attr:
+                                stmt.else_branch = None
                             stmt.condition = ast.IntLiteral(value=1,
                                                             location=stmt.condition.location)
                         else:
@@ -192,12 +202,12 @@ class ASTOptimizer:
                     else:
                         # Then-branch has labels, can't eliminate
                         self._optimize_stmt(stmt.then_branch)
-                        if stmt.else_branch is not None:
-                            self._optimize_stmt(stmt.else_branch)
+                        if else_b is not None:
+                            self._optimize_stmt(else_b)
             else:
                 self._optimize_stmt(stmt.then_branch)
-                if stmt.else_branch is not None:
-                    self._optimize_stmt(stmt.else_branch)
+                if else_b is not None:
+                    self._optimize_stmt(else_b)
 
         elif isinstance(stmt, ast.WhileStmt):
             # The body may run multiple times and re-enter the
@@ -274,10 +284,11 @@ class ASTOptimizer:
             return True
         if isinstance(node, ast.CompoundStmt):
             return any(ASTOptimizer._contains_label(item) for item in node.items)
-        if isinstance(node, ast.IfStmt):
+        if isinstance(node, (ast.IfStmt, ast.IfStmtElse)):
             if ASTOptimizer._contains_label(node.then_branch):
                 return True
-            if node.else_branch and ASTOptimizer._contains_label(node.else_branch):
+            else_b = getattr(node, "else_branch", None)
+            if else_b and ASTOptimizer._contains_label(else_b):
                 return True
         if isinstance(node, (ast.WhileStmt, ast.DoWhileStmt, ast.ForStmt)):
             return ASTOptimizer._contains_label(node.body)
@@ -1255,11 +1266,12 @@ class ASTOptimizer:
         elif isinstance(stmt, ast.ExpressionStmt):
             if stmt.expr is not None:
                 result.update(self._get_modified_vars_in_expr(stmt.expr))
-        elif isinstance(stmt, ast.IfStmt):
+        elif isinstance(stmt, (ast.IfStmt, ast.IfStmtElse)):
             result.update(self._get_modified_vars_in_expr(stmt.condition))
             result.update(self._get_modified_vars_in_stmt(stmt.then_branch))
-            if stmt.else_branch is not None:
-                result.update(self._get_modified_vars_in_stmt(stmt.else_branch))
+            else_b = getattr(stmt, "else_branch", None)
+            if else_b is not None:
+                result.update(self._get_modified_vars_in_stmt(else_b))
         elif isinstance(stmt, ast.WhileStmt):
             result.update(self._get_modified_vars_in_expr(stmt.condition))
             result.update(self._get_modified_vars_in_stmt(stmt.body))
@@ -1293,12 +1305,13 @@ class ASTOptimizer:
             return any(ASTOptimizer._stmt_has_calls(item) for item in stmt.items)
         if isinstance(stmt, ast.ExpressionStmt):
             return stmt.expr is not None and ASTOptimizer._expr_has_calls(stmt.expr)
-        if isinstance(stmt, ast.IfStmt):
+        if isinstance(stmt, (ast.IfStmt, ast.IfStmtElse)):
             if ASTOptimizer._expr_has_calls(stmt.condition):
                 return True
             if ASTOptimizer._stmt_has_calls(stmt.then_branch):
                 return True
-            if stmt.else_branch and ASTOptimizer._stmt_has_calls(stmt.else_branch):
+            else_b = getattr(stmt, "else_branch", None)
+            if else_b and ASTOptimizer._stmt_has_calls(else_b):
                 return True
             return False
         if isinstance(stmt, ast.WhileStmt):
@@ -1424,8 +1437,8 @@ class ASTOptimizer:
             if isinstance(item.init, ast.Identifier):
                 if self._types_compatible_for_copy(item.name, item.init.name):
                     self._copies[item.name] = item.init.name
-        elif isinstance(item, (ast.IfStmt, ast.WhileStmt, ast.DoWhileStmt,
-                               ast.ForStmt, ast.SwitchStmt)):
+        elif isinstance(item, (ast.IfStmt, ast.IfStmtElse, ast.WhileStmt,
+                               ast.DoWhileStmt, ast.ForStmt, ast.SwitchStmt)):
             # Control flow structures: conservatively clear caches
             self._clear_all_caches()
         elif isinstance(item, (ast.ReturnStmt, ast.GotoStmt)):
@@ -1689,10 +1702,11 @@ class ASTOptimizer:
             return True
         if isinstance(node, ast.CompoundStmt):
             return any(ASTOptimizer._contains_flow_control(item) for item in node.items)
-        if isinstance(node, ast.IfStmt):
+        if isinstance(node, (ast.IfStmt, ast.IfStmtElse)):
             if ASTOptimizer._contains_flow_control(node.then_branch):
                 return True
-            if node.else_branch and ASTOptimizer._contains_flow_control(node.else_branch):
+            else_b = getattr(node, "else_branch", None)
+            if else_b and ASTOptimizer._contains_flow_control(else_b):
                 return True
         if isinstance(node, (ast.WhileStmt, ast.DoWhileStmt)):
             return ASTOptimizer._contains_flow_control(node.body)
