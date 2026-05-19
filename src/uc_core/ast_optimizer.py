@@ -952,7 +952,12 @@ class ASTOptimizer:
             mask = max(self._literal_mask(right), self._literal_mask(left.right))
 
             def _new(val: int) -> ast.IntLiteral:
-                return make_int_lit(val)
+                # Preserve unsignedness: a fold of `4 - 8U` is 4294967292
+                # which, minted as a bare decimal, doesn't fit int/32-bit
+                # long and wrongly promotes to long long. Tagging it
+                # unsigned keeps it `unsigned int` (32-bit). Mirrors the
+                # main const-fold path (see make_int_lit call below).
+                return make_int_lit(val, unsigned=is_unsigned)
 
             # (x + c1) + c2 → x + (c1 + c2)
             if op == "+" and inner_op == "+":
