@@ -528,7 +528,10 @@ class ASTOptimizer:
                         result -= (mask + 1)
                 self._stat("const_fold")
                 self._changed = True
-                return make_int_lit(result)
+                # Preserve unsignedness so a subsequent fold (e.g. an
+                # outer relational compare) applies C's usual arithmetic
+                # conversions — `(-1) >= (UINT_MAX)` must fold to 1.
+                return make_int_lit(result, unsigned=unsigned)
 
         # === Strength reduction: multiply by power-of-2 ===
         if op == "*":

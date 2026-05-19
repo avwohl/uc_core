@@ -190,14 +190,21 @@ def char_value(lit) -> int:
     return val
 
 
-def make_int_lit(value: int, *, is_hex: bool = False) -> "ast.IntLiteral":
+def make_int_lit(value: int, *, is_hex: bool = False,
+                 unsigned: bool = False) -> "ast.IntLiteral":
     """Synthesise an ``IntLiteral`` for a folded constant.
 
     The synthetic Token has ``text = str(value)`` (or ``hex()`` when
-    ``is_hex``) so future :func:`int_value` calls can decode it. The
-    ``line`` / ``column`` / ``offset`` fields are zeroed.
+    ``is_hex``) so future :func:`int_value` calls can decode it. When
+    ``unsigned`` a ``u`` suffix is appended so :func:`int_flags`
+    reports the constant as unsigned — required so a fold of unsigned
+    operands (``2U + 1U``) keeps its unsigned type for the *next*
+    fold (e.g. a relational comparison). The ``line`` / ``column`` /
+    ``offset`` fields are zeroed.
     """
     text = hex(value) if is_hex else str(value)
+    if unsigned:
+        text += "u"
     tok = _make_token("INT_LIT", text)
     pos = ast._Pos()
     return ast.IntLiteral(value=tok, pos=pos)
