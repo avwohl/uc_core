@@ -648,7 +648,13 @@ class ASTOptimizer:
                 # Per C99 6.5.3.3: ! operator always returns int (not unsigned, not long)
                 if op == "!":
                     return make_int_lit(result)
-                return make_int_lit(result)
+                # Preserve unsignedness: `-123U` folds to 4294967173,
+                # which minted as a bare decimal doesn't fit int/32-bit
+                # long and wrongly promotes to long long (a later
+                # `int != that` then runs as a 64-bit compare and
+                # mis-handles the sign). Tag it unsigned so it stays
+                # `unsigned int`. Mirrors the binary const-fold paths.
+                return make_int_lit(result, unsigned=int_flags(operand)[2])
 
         # Double negation: -(-x) → x, ~(~x) → x
         if isinstance(operand, ast.UnaryOp) and _op(operand) == op and op in ("-", "~"):
