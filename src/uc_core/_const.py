@@ -135,11 +135,18 @@ def char_value(lit) -> int:
             f"char_value: expected CharLiteral, got {type(lit).__name__}"
         )
     text = lit.value.text
-    # Strip encoding prefix.
+    # Strip encoding prefix and pick the value mask: a wide char keeps
+    # the full code value (`L'\400'` == 256), only plain/u8 char
+    # constants truncate escapes to a byte.
+    cmask = 0xFF
     if text.startswith("u8"):
         text = text[2:]
-    elif text.startswith(("u", "U", "L")):
+    elif text.startswith("u"):
         text = text[1:]
+        cmask = 0xFFFF          # char16_t
+    elif text.startswith(("U", "L")):
+        text = text[1:]
+        cmask = 0xFFFFFFFF      # char32_t / wchar_t (int on this target)
     # Strip the surrounding single quotes.
     if text.startswith("'") and text.endswith("'"):
         body = text[1:-1]
@@ -166,14 +173,14 @@ def char_value(lit) -> int:
                 hex_digits = "0123456789abcdefABCDEF"
                 while j < len(body) and body[j] in hex_digits:
                     j += 1
-                out.append(int(body[i + 2:j], 16) & 0xFF)
+                out.append(int(body[i + 2:j], 16) & cmask)
                 i = j
                 continue
             if nxt in "01234567":
                 j = i + 1
                 while j < len(body) and j < i + 4 and body[j] in "01234567":
                     j += 1
-                out.append(int(body[i + 1:j], 8) & 0xFF)
+                out.append(int(body[i + 1:j], 8) & cmask)
                 i = j
                 continue
             out.append(ord(nxt))
@@ -183,7 +190,11 @@ def char_value(lit) -> int:
         i += 1
     if not out:
         return 0
-    # Multi-character constant: pack MSB-first.
+    # A wide char constant holds one full code value — don't byte-pack
+    # (`L'\400'` == 256, not 0).
+    if cmask != 0xFF and len(out) == 1:
+        return out[0] & cmask
+    # Multi-character (narrow) constant: pack MSB-first.
     val = 0
     for b in out:
         val = (val << 8) | (b & 0xFF)
