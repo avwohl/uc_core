@@ -145,7 +145,12 @@ def char_value(lit) -> int:
         body = text[1:-1]
     else:
         body = text
-    esc = {"n": 10, "t": 9, "r": 13, "\\": 92, "'": 39, '"': 34, "0": 0,
+    # NB: `\0` is intentionally NOT a named escape — it is the 1-digit
+    # case of the octal-escape rule below, so `\001`, `\033`, `\377`
+    # decode as single octal escapes instead of `\0` + literal digits
+    # (which made `'\001'` a 3-char constant 0x3031). Mirrors the
+    # string-literal decoder in codegen_helpers.
+    esc = {"n": 10, "t": 9, "r": 13, "\\": 92, "'": 39, '"': 34,
            "a": 7, "b": 8, "f": 12, "v": 11, "?": 63}
     out: list[int] = []
     i = 0
