@@ -46,7 +46,8 @@ predefines = {
 
 pp = Preprocessor(include_paths=["lib/include"], target_predefines=predefines)
 source = pp.preprocess(open("hello.c").read(), "hello.c")
-ast = parse(source, "hello.c")
+ast = parse(source, "hello.c")            # strict C23
+# ast = parse(source, "hello.c", kr_prepass=True)  # pre-ANSI sources
 ast = ASTOptimizer(opt_level=3).optimize(ast)
 
 # Backend is provided by the target package (uc80, uc386, ...)
@@ -57,6 +58,24 @@ The front-end is plox-driven: `uc_core/frontend.py` runs the lexer
 + LR(1) parser produced from `plox/examples/c23.plox` and lowers the
 parse tree into `uc_core/ast.py` dataclasses. The pre-built tables
 ship as `uc_core/data/c23.json`.
+
+### K&R / implicit-int compatibility (`kr_prepass`)
+
+The grammar is strict C23, which has no implicit-`int` and no K&R
+old-style parameter lists. `parse(..., kr_prepass=True)` enables a
+source-level recovery: the strict parse is attempted first, and
+**only if it fails** are the two pre-ANSI shapes rewritten to
+equivalent ANSI and the parse retried —
+
+```c
+main() { … }                 ->  int main() { … }
+f(a, b) int a; char *b; { … } ->  int f(int a, char *b) { … }
+```
+
+Off by default, so modern code is parsed exactly once and never
+reaches the rewriter (zero cost). Backends expose it as they see fit
+(e.g. `uc386 --kr`); it is intended for legacy/pre-ANSI codebases
+such as the gcc-c-torture corpus.
 
 ## Related Projects
 

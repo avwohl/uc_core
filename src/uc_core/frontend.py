@@ -187,6 +187,288 @@ def _strip_dos_paren_qualifiers(source: str) -> str:
     return "".join(out)
 
 
+# ---- K&R / implicit-int pre-pass (opt-in) ----------------------------------
+#
+# The uplox c23 grammar models only ANSI/C23 function definitions: every
+# external declaration must open with a declaration-specifier. Pre-ANSI
+# sources — pervasive in the gcc-c-torture corpus — use implicit-int
+# returns (`main() { }`) and K&R old-style parameter lists
+# (`foo(a, b) int a; char *b; { }`). Rather than grow the LR grammar
+# (conflict-prone, balloons the state table), we rewrite those two
+# shapes into equivalent ANSI at the source level — but ONLY when the
+# host explicitly asks (`kr_prepass=True`). Modern code never reaches
+# this scanner, so it pays exactly zero cost.
+
+_KR_TYPE_SPEC = frozenset({
+    "void", "char", "short", "int", "long", "float", "double",
+    "signed", "unsigned", "_Bool", "bool", "_Complex", "_Imaginary",
+    "struct", "union", "enum", "_BitInt", "__int128",
+    "_Decimal32", "_Decimal64", "_Decimal128",
+    "typeof", "typeof_unqual", "__typeof", "__typeof__",
+})
+# Specifier keywords that may precede the return type / function name
+# without themselves being a type (so `static foo() {}` is still
+# implicit-int).
+_KR_NONTYPE_SPEC = frozenset({
+    "static", "extern", "inline", "register", "auto", "const",
+    "volatile", "restrict", "_Noreturn", "_Thread_local", "_Atomic",
+    "__inline", "__inline__", "__forceinline",
+})
+_KR_IDENT = re.compile(r"[A-Za-z_]\w*")
+
+
+def _kr_tokens(s: str) -> list[tuple[str, int, int]]:
+    """Lightweight tokenizer: (text, start, end), skipping whitespace,
+    string/char literals and any stray comments. Identifiers and numbers
+    come back whole; every other non-space char is a 1-char punctuation
+    token. Good enough to find function-definition heads at file scope."""
+    out: list[tuple[str, int, int]] = []
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c in " \t\r\n\f\v":
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and s[i + 1] == "/":
+            i = s.find("\n", i)
+            if i < 0:
+                break
+            continue
+        if c == "/" and i + 1 < n and s[i + 1] == "*":
+            j = s.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c == '"' or c == "'":
+            j = i + 1
+            while j < n and s[j] != c:
+                j += 2 if s[j] == "\\" else 1
+            out.append((s[i:j + 1], i, j + 1))
+            i = j + 1
+            continue
+        m = _KR_IDENT.match(s, i)
+        if m:
+            out.append((m.group(0), m.start(), m.end()))
+            i = m.end()
+            continue
+        out.append((c, i, i + 1))
+        i += 1
+    return out
+
+
+def _kr_ansi_params(param_ids: list[str], kr_decls: str) -> str:
+    """Build an ANSI parameter list from a K&R identifier list plus the
+    declaration block between `)` and `{`. Params with no K&R
+    declaration default to `int` (the K&R rule)."""
+    types: dict[str, str] = {}
+    for decl in kr_decls.split(";"):
+        decl = decl.strip()
+        if not decl:
+            continue
+        toks = [t[0] for t in _kr_tokens(decl)]
+        if not toks:
+            continue
+        # Comma-separated declarators sharing one base type. The base
+        # type is whatever precedes the *name* in the first declarator
+        # group (the name = the last identifier in that group, so
+        # `struct foo b` / `unsigned long n` / `Point p0` all work).
+        groups: list[list[str]] = []
+        cur: list[str] = []
+        for t in toks:
+            if t == ",":
+                groups.append(cur)
+                cur = []
+            else:
+                cur.append(t)
+        if cur:
+            groups.append(cur)
+        if not groups:
+            continue
+
+        def _name_idx(g: list[str]) -> int:
+            for idx in range(len(g) - 1, -1, -1):
+                if _KR_IDENT.fullmatch(g[idx]) and g[idx] not in _KR_TYPE_SPEC:
+                    return idx
+            return -1
+
+        ni = _name_idx(groups[0])
+        if ni < 0:
+            continue
+        base_t = " ".join(x for x in groups[0][:ni] if x != "*") or "int"
+        for g in groups:
+            gi = _name_idx(g)
+            if gi < 0:
+                continue
+            name = g[gi]
+            stars = "".join(x for x in g if x == "*")
+            arr = "[]" if "[" in g else ""
+            types[name] = f"{base_t} {stars}{name}{arr}".strip()
+    parts = [types.get(pid, f"int {pid}") for pid in param_ids]
+    return ", ".join(parts) if parts else "void"
+
+
+def _rewrite_kr_and_implicit_int(source: str) -> str:
+    """Rewrite pre-ANSI function definitions into ANSI C at the source
+    level. Two shapes handled, at file scope only:
+
+      * implicit-int return:  `main() {`        -> `int main() {`
+      * K&R parameter list:    `f(a, b) int a; double b; {`
+                               -> `int f(int a, double b) {`
+
+    A function whose return type is explicit but whose parameters are
+    K&R-style bare identifiers gets only the parameter rewrite. Function
+    prototypes/declarations with implicit int (`foo();`) get the `int`
+    prefix but no parameter surgery. Conservative: anything that doesn't
+    cleanly match is left untouched (max-recovery, no regressions on the
+    shapes we already parse)."""
+    toks = _kr_tokens(source)
+    edits: list[tuple[int, int, str]] = []
+    depth = 0
+    i = 0
+    # External-declaration boundary: start of file, or just after a
+    # top-level `;` / `}` (depth back to 0).
+    at_boundary = True
+    while i < len(toks):
+        text = toks[i][0]
+        if text == "{":
+            depth += 1
+            at_boundary = False
+            i += 1
+            continue
+        if text == "}":
+            depth -= 1
+            at_boundary = depth == 0
+            i += 1
+            continue
+        if text == ";":
+            at_boundary = depth == 0
+            i += 1
+            continue
+        if depth != 0 or not at_boundary:
+            i += 1
+            continue
+        # At a file-scope boundary: try to match a function head.
+        # Consume a specifier prefix (storage/qual/type keywords, *,
+        # and typedef/return-type identifiers) until `IDENT (`.
+        j = i
+        has_typespec = False
+        saw_ident = False
+        while j < len(toks):
+            t = toks[j][0]
+            nxt = toks[j + 1][0] if j + 1 < len(toks) else ""
+            if _KR_IDENT.fullmatch(t):
+                if t in _KR_TYPE_SPEC:
+                    has_typespec = True
+                    j += 1
+                    continue
+                if t in _KR_NONTYPE_SPEC:
+                    j += 1
+                    continue
+                # plain identifier: function name iff next is '('
+                if nxt == "(":
+                    break
+                # else it's a return-type typedef-name (e.g. `Foo bar(`)
+                has_typespec = True
+                saw_ident = True
+                j += 1
+                continue
+            if t == "*":
+                has_typespec = True  # `T *foo(` — return type present
+                j += 1
+                continue
+            break
+        # Need `NAME (` here.
+        if j + 1 >= len(toks) or not _KR_IDENT.fullmatch(toks[j][0]) \
+                or toks[j][0] in _KR_TYPE_SPEC or toks[j + 1][0] != "(":
+            at_boundary = False
+            i += 1
+            continue
+        name_idx = j
+        # Match the parenthesised parameter list.
+        pdepth = 0
+        k = j + 1
+        while k < len(toks):
+            if toks[k][0] == "(":
+                pdepth += 1
+            elif toks[k][0] == ")":
+                pdepth -= 1
+                if pdepth == 0:
+                    break
+            k += 1
+        if k >= len(toks) or pdepth != 0:
+            at_boundary = False
+            i += 1
+            continue
+        rparen_idx = k
+        param_toks = toks[j + 2:rparen_idx]
+        # Classify by the token right after `)`:
+        #   `{`  -> definition, no K&R decl block
+        #   `;`  -> prototype/declaration
+        #   else -> K&R declaration block; the body `{` is the first
+        #           brace after it (K&R param decls don't carry braces
+        #           in the torture corpus).
+        nxt_after = toks[rparen_idx + 1][0] if rparen_idx + 1 < len(toks) else ""
+        if nxt_after == "{":
+            m, term = rparen_idx + 1, "{"
+        elif nxt_after == ";":
+            m, term = rparen_idx + 1, ";"
+        else:
+            m = rparen_idx + 1
+            while m < len(toks) and toks[m][0] not in ("{", "}"):
+                m += 1
+            term = "{" if m < len(toks) and toks[m][0] == "{" else ""
+        if not term:
+            at_boundary = False
+            i += 1
+            continue
+        # Is the param list K&R (every entry a bare identifier)?
+        ids: list[str] = []
+        is_kr_params = len(param_toks) > 0
+        grp: list[str] = []
+        seq = [t[0] for t in param_toks] + [","]
+        for x in seq:
+            if x == ",":
+                if len(grp) == 1 and _KR_IDENT.fullmatch(grp[0]) \
+                        and grp[0] not in _KR_TYPE_SPEC and grp[0] != "void":
+                    ids.append(grp[0])
+                else:
+                    is_kr_params = False
+                grp = []
+            else:
+                grp.append(x)
+        name_start = toks[name_idx][1]
+        if term == ";":
+            # prototype: only fix implicit int
+            if not has_typespec:
+                edits.append((name_start, name_start, "int "))
+        else:
+            # definition
+            if is_kr_params:
+                kr_decls = source[toks[rparen_idx][2]:toks[m][1]]
+                ansi = _kr_ansi_params(ids, kr_decls)
+                edits.append((toks[j + 1][1], toks[m][1],
+                              f"({ansi}) "))
+            if not has_typespec:
+                edits.append((name_start, name_start, "int "))
+        # Resume scanning after the function name; body braces handled
+        # by the normal depth tracking.
+        at_boundary = False
+        i = name_idx + 1
+
+    if not edits:
+        return source
+    edits.sort(key=lambda e: e[0])
+    out: list[str] = []
+    pos = 0
+    for st, en, rep in edits:
+        if st < pos:          # overlapping edit guard — skip
+            continue
+        out.append(source[pos:st])
+        out.append(rep)
+        pos = en
+    out.append(source[pos:])
+    return "".join(out)
+
+
 # ---- typedef tracker -------------------------------------------------------
 
 
@@ -426,11 +708,17 @@ def parse(
     source: str,
     filename: str = "<stdin>",
     seed_typedefs: set[str] | None = None,
+    kr_prepass: bool = False,
 ) -> ast.TranslationUnit:
     """Parse already-preprocessed C source into a typed AST.
 
     The caller is expected to have run :class:`uc_core.preprocessor`
     over ``source`` first.
+
+    ``kr_prepass=True`` enables the pre-ANSI source rewrite
+    (implicit-int returns + K&R parameter lists -> ANSI). Off by
+    default so modern code pays zero cost; hosts compiling old code
+    (e.g. the gcc-c-torture corpus) opt in explicitly.
 
     ``seed_typedefs`` pre-populates the typedef tracker with names a
     host knows about from system headers it processed out-of-band
@@ -463,9 +751,29 @@ def parse(
     vector_names: set = set()
     pre = _strip_attributes(source, vector_names)
     hooks, filter_ = _make_typedef_filter(seed_typedefs)
-    unit = c23_parser.parse(
-        pre, filename=filename, hooks=hooks, token_filter=filter_
-    )
+    try:
+        unit = c23_parser.parse(
+            pre, filename=filename, hooks=hooks, token_filter=filter_
+        )
+    except c23_parser.ParseError:
+        # Strict C23 parse failed. Only if the host opted into K&R
+        # recovery do we rewrite the pre-ANSI shapes (implicit-int
+        # returns / K&R parameter lists) and retry — and only for
+        # *this* file, which demonstrably needs it. Modern code parses
+        # on the first attempt and never reaches the scanner: zero
+        # cost and zero mis-rewrite risk, even inside the torture
+        # corpus where the flag is on for every file.
+        if not kr_prepass:
+            raise
+        rewritten = _rewrite_kr_and_implicit_int(pre)
+        if rewritten == pre:
+            raise  # nothing pre-ANSI here — surface the real error
+        # Fresh typedef-tracker state; the failed attempt left the
+        # filter's scan position dirty.
+        hooks, filter_ = _make_typedef_filter(seed_typedefs)
+        unit = c23_parser.parse(
+            rewritten, filename=filename, hooks=hooks, token_filter=filter_
+        )
     # Attach the set of names that had `__attribute__((vector_size(N)))`
     # rewritten away — downstream consumers (uc386 codegen) read this
     # to flip the GCC is_vector flag on the resolved ArrayType.
