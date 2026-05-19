@@ -111,6 +111,7 @@ _NO_CRASH_SOURCES = [
     "int sw(int x){ switch (x){ case 0: return 1; default: return x; } }",
     "void v(void){ int i = 0; while (i < 10){ i++; } }",
     "int d(void){ int x = 0; do { x++; } while (x < 3); return x; }",
+    "int c(int ch){ return ch == '\\n' || ch == '\\t' || '0' == ch; }",
 ]
 
 
@@ -345,3 +346,19 @@ def test_algebraic_mul_zero():
     unit = _optimize("int f(int x){ return x * 0; }")
     val = _find(unit, "ReturnStmtValue")[0].value
     assert isinstance(val, ast.IntLiteral) and int_value(val) == 0
+
+
+def test_commutative_normalization_with_char_literal():
+    """Regression: _normalize_commutative.sort_key fed a CharLiteral to
+    int_value (which only accepts IntLiteral) and crashed. Any
+    commutative op (`==`, `+`, ...) with a char-literal operand —
+    pervasive in C string code (`c == '\\n'`) — tripped it. sort_key
+    must decode chars via char_value, mirroring the _expr_key CHR:
+    path. Broke 7 of 14 uc386 GNU addons (cat/wc/head/tail/...)."""
+    # `'A' == c` must normalize to `c == 'A'` (Identifier sorts before
+    # the constant bucket) without raising.
+    unit = _optimize("int f(int c){ return 'A' == c; }")
+    val = _find(unit, "ReturnStmtValue")[0].value
+    assert type(val).__name__ == "BinaryOp"
+    assert type(val.left).__name__ == "Identifier"
+    assert isinstance(val.right, ast.CharLiteral)

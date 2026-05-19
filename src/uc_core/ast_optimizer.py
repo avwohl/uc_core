@@ -23,7 +23,7 @@ Level 3 (-O3) adds:
 import copy
 import dataclasses
 from . import ast
-from ._const import int_value, int_flags, make_int_lit
+from ._const import int_value, int_flags, make_int_lit, char_value
 from .c23_parser import Token
 from .codegen_helpers import make_identifier
 from .type_config import TypeConfig, Z80_CPM
@@ -1437,7 +1437,11 @@ class ASTOptimizer:
             if isinstance(e, ast.IntLiteral):
                 return (2, _iv(e))
             if isinstance(e, ast.CharLiteral):
-                return (2, _iv(e))
+                # Char literals sort into the same "constant" bucket as
+                # int literals, keyed by codepoint. Must use char_value
+                # (not _iv/int_value, which rejects CharLiteral) —
+                # mirrors the _expr_key CHR: path below.
+                return (2, char_value(e))
             # Complex expression
             k = self._expr_key(e)
             return (1, k if k else "")
