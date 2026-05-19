@@ -61,6 +61,15 @@ def _idname(ident) -> str:
 # effects, so both must be matched everywhere a call is analysed.
 _CALL = (ast.Call, ast.CallNoArgs)
 
+# The auto-AST splits member access into Member (`.`) and ArrowMember
+# (`->`) — the same present/absent node-split as Call/CallNoArgs.
+# They are field-identical (`obj`, `member`, `pos`); only ArrowMember
+# implies a pointer dereference. Code that just recurses into the
+# object must accept both, or it silently stops at a `->` (which made
+# dead-store elimination treat `p = ...; p = &((T*)p)->m[0];` as a
+# dead first store — a miscompile).
+_MEMBER = (ast.Member, ast.ArrowMember)
+
 
 def _call_args(node) -> list:
     """Argument list of a Call/CallNoArgs (CallNoArgs has none)."""
@@ -413,7 +422,7 @@ class ASTOptimizer:
                 if isinstance(expr.left, ast.Index):
                     expr.left.array = self._optimize_expr(expr.left.array)
                     expr.left.index = self._optimize_expr(expr.left.index)
-                elif isinstance(expr.left, ast.Member):
+                elif isinstance(expr.left, _MEMBER):
                     expr.left.obj = self._optimize_expr(expr.left.obj)
                 expr.right = self._optimize_expr(expr.right)
                 return self._optimize_binary(expr)
@@ -1173,7 +1182,7 @@ class ASTOptimizer:
             result.update(ASTOptimizer._get_expr_vars(expr.index))
         elif isinstance(expr, ast.Cast):
             result.update(ASTOptimizer._get_expr_vars(expr.expr))
-        elif isinstance(expr, ast.Member):
+        elif isinstance(expr, _MEMBER):
             result.update(ASTOptimizer._get_expr_vars(expr.obj))
         return result
 
@@ -1211,7 +1220,7 @@ class ASTOptimizer:
         # effect, but the object expression may. Without this,
         # `make().x * 2` got strength-reduced to
         # `make().x + make().x`, calling `make()` twice.
-        if isinstance(expr, ast.Member):
+        if isinstance(expr, _MEMBER):
             return ASTOptimizer._expr_has_side_effects(expr.obj)
         # Compound literals: `(T){init}` evaluates each initializer
         # when the literal is materialized. Without this,
@@ -1236,7 +1245,7 @@ class ASTOptimizer:
         """
         if isinstance(expr, ast.UnaryOp) and _op(expr) == "*":
             return True
-        if isinstance(expr, ast.Member) and expr.is_arrow:
+        if isinstance(expr, ast.ArrowMember):
             return True
         if isinstance(expr, _CALL):
             return True
@@ -1260,7 +1269,7 @@ class ASTOptimizer:
             )
         if isinstance(expr, ast.Cast):
             return ASTOptimizer._expr_has_pointer_or_call(expr.expr)
-        if isinstance(expr, ast.Member):
+        if isinstance(expr, _MEMBER):
             return ASTOptimizer._expr_has_pointer_or_call(expr.obj)
         return False
 
@@ -1287,7 +1296,7 @@ class ASTOptimizer:
                     ASTOptimizer._expr_references_var(expr.index, name))
         if isinstance(expr, ast.Cast):
             return ASTOptimizer._expr_references_var(expr.expr, name)
-        if isinstance(expr, ast.Member):
+        if isinstance(expr, _MEMBER):
             return ASTOptimizer._expr_references_var(expr.obj, name)
         return False
 
