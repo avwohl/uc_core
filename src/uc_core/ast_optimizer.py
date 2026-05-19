@@ -70,6 +70,14 @@ _CALL = (ast.Call, ast.CallNoArgs)
 # dead first store — a miscompile).
 _MEMBER = (ast.Member, ast.ArrowMember)
 
+# Same present/absent node-split for `case V:` and `default:` — both
+# label the next statement, both expose it on `.stmt`. Predicates
+# that match only `CaseStmt` silently miss `DefaultStmt`; the most
+# damaging case is DCE-after-unconditional-branch removing a
+# `default:` block (c-testsuite 00158: a switch with `case 1: …
+# break; default: … break;` lost the entire default branch).
+_CASE = (ast.CaseStmt, ast.DefaultStmt)
+
 
 def _call_args(node) -> list:
     """Argument list of a Call/CallNoArgs (CallNoArgs has none)."""
@@ -376,6 +384,9 @@ class ASTOptimizer:
                 stmt.value = self._optimize_expr(stmt.value)
             self._optimize_stmt(stmt.stmt)
 
+        elif isinstance(stmt, ast.DefaultStmt):
+            self._optimize_stmt(stmt.stmt)
+
         elif isinstance(stmt, ast.LabelStmt):
             self._optimize_stmt(stmt.stmt)
 
@@ -385,7 +396,7 @@ class ASTOptimizer:
     @staticmethod
     def _contains_label(node) -> bool:
         """Check if a statement (or any nested statement) contains a label or case."""
-        if isinstance(node, (ast.LabelStmt, ast.CaseStmt)):
+        if isinstance(node, (ast.LabelStmt,) + _CASE):
             return True
         if isinstance(node, ast.CompoundStmt):
             return any(ASTOptimizer._contains_label(item) for item in node.items)
@@ -1084,7 +1095,7 @@ class ASTOptimizer:
         elif isinstance(node, ast.SwitchStmt):
             self._collect_address_taken(node.expr)
             self._collect_address_taken(node.body)
-        elif isinstance(node, ast.CaseStmt):
+        elif isinstance(node, _CASE):
             self._collect_address_taken(node.stmt)
         elif isinstance(node, ast.LabelStmt):
             self._collect_address_taken(node.stmt)
@@ -1373,7 +1384,7 @@ class ASTOptimizer:
         elif isinstance(stmt, ast.SwitchStmt):
             result.update(self._get_modified_vars_in_expr(stmt.expr))
             result.update(self._get_modified_vars_in_stmt(stmt.body))
-        elif isinstance(stmt, ast.CaseStmt):
+        elif isinstance(stmt, _CASE):
             result.update(self._get_modified_vars_in_stmt(stmt.stmt))
         elif isinstance(stmt, ast.LabelStmt):
             result.update(self._get_modified_vars_in_stmt(stmt.stmt))
@@ -1414,7 +1425,7 @@ class ASTOptimizer:
             if stmt.update and ASTOptimizer._expr_has_calls(stmt.update):
                 return True
             return ASTOptimizer._stmt_has_calls(stmt.body)
-        if isinstance(stmt, ast.CaseStmt):
+        if isinstance(stmt, _CASE):
             return ASTOptimizer._stmt_has_calls(stmt.stmt)
         if isinstance(stmt, ast.LabelStmt):
             return ASTOptimizer._stmt_has_calls(stmt.stmt)
@@ -1511,7 +1522,7 @@ class ASTOptimizer:
 
     def _invalidate_caches_for_stmt(self, item) -> None:
         """After processing a statement, invalidate caches as needed."""
-        if isinstance(item, (ast.LabelStmt, ast.CaseStmt)):
+        if isinstance(item, (ast.LabelStmt,) + _CASE):
             # Non-linear control flow: clear everything
             self._clear_all_caches()
             return
@@ -1850,7 +1861,7 @@ class ASTOptimizer:
         """Check if a statement contains break, continue, goto, or labels."""
         if isinstance(node, (ast.BreakStmt, ast.ContinueStmt, ast.GotoStmt)):
             return True
-        if isinstance(node, (ast.LabelStmt, ast.CaseStmt)):
+        if isinstance(node, (ast.LabelStmt,) + _CASE):
             return True
         if isinstance(node, ast.CompoundStmt):
             return any(ASTOptimizer._contains_flow_control(item) for item in node.items)
