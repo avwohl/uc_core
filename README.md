@@ -72,10 +72,22 @@ main() { … }                 ->  int main() { … }
 f(a, b) int a; char *b; { … } ->  int f(int a, char *b) { … }
 ```
 
+The same opt-in also lowers the GNU **computed-goto / labels-as-values**
+extension (`&&label`, `goto *expr`) into a `switch` dispatch over an
+integer id-encoding of each function's address-taken labels — affine
+label arithmetic (`&&a - &&b`, threaded code) stays consistent, and
+the result uses only `switch`/`goto`/casts:
+
+```c
+void *t[] = {&&a, &&b}; goto *t[i];
+  ->  void *t[]={(void*)0,(void*)1};
+      switch((long)(t[i])){case 0: goto a; case 1: goto b; default:;}
+```
+
 Off by default, so modern code is parsed exactly once and never
 reaches the rewriter (zero cost). Backends expose it as they see fit
-(e.g. `uc386 --kr`); it is intended for legacy/pre-ANSI codebases
-such as the gcc-c-torture corpus.
+(e.g. `uc386 --kr`); it is intended for legacy/pre-ANSI and GNU-C
+codebases such as the gcc-c-torture corpus.
 
 ## Related Projects
 

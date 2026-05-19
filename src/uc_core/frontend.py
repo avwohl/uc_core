@@ -469,6 +469,150 @@ def _rewrite_kr_and_implicit_int(source: str) -> str:
     return "".join(out)
 
 
+# ---- GNU computed-goto / labels-as-values (opt-in) -------------------------
+#
+# GCC's "labels as values" extension (`void *p = &&lab; goto *p;`) is not
+# C23 and the strict grammar rejects `&&label` / `goto *expr`. The
+# gcc-c-torture corpus uses it for jump tables and threaded code, where
+# label addresses are only ever combined with each other (stored in
+# `void*[]`, subtracted as `&&a - &&b`, added back to a `&&base`). That
+# makes a consistent integer-id encoding semantics-preserving: give each
+# address-taken label (per function) a small id, lower `&&L` to
+# `((void*)id)` and `goto *E` to `switch ((long)(E)) { case id: goto L; }`
+# over every address-taken label in that function. Affine arithmetic
+# stays correct because it is all integer math in id-space, and the
+# result uses only switch/goto/cast — all of which codegen handles.
+# Source-level only: no grammar change, no LR-table regen.
+
+# Token texts after which `&&IDENT` is the logical-AND operator (its
+# left operand just ended) rather than the address-of-label prefix.
+_CG_OPERAND_END = frozenset({")", "]"})
+
+
+def _rewrite_computed_goto(source: str) -> str:
+    toks = _kr_tokens(source)
+    n = len(toks)
+
+    class _Scope:
+        __slots__ = ("refs", "gotos", "names")
+
+        def __init__(self) -> None:
+            self.refs: list[tuple[int, int, str]] = []   # (start, end, name)
+            self.gotos: list[tuple[int, int, str]] = []   # (start, end, exprtxt)
+            self.names: set[str] = set()
+
+    scopes: list[_Scope] = []
+    fn_stack: list[_Scope] = []
+    depth = 0
+    k = 0
+    while k < n:
+        t, st, en = toks[k]
+        if t == "{":
+            depth += 1
+            if depth == 1:
+                sc = _Scope()
+                scopes.append(sc)
+                fn_stack.append(sc)
+            k += 1
+            continue
+        if t == "}":
+            if depth == 1 and fn_stack:
+                fn_stack.pop()
+            depth = max(0, depth - 1)
+            k += 1
+            continue
+        if depth == 0 or not fn_stack:
+            k += 1
+            continue
+        sc = fn_stack[-1]
+        # `&& IDENT` as label-address (not logical-AND).
+        if (
+            t == "&" and k + 2 < n and toks[k + 1][0] == "&"
+            and _KR_IDENT.fullmatch(toks[k + 2][0])
+            and toks[k + 2][0] not in _KR_TYPE_SPEC
+        ):
+            prev = toks[k - 1][0] if k > 0 else ""
+            prev_is_operand = (
+                prev in _CG_OPERAND_END
+                or _KR_IDENT.fullmatch(prev) and prev not in (
+                    "return", "case", "goto"
+                )
+                or (prev[:1].isdigit())
+                or prev[:1] in ('"', "'")
+            )
+            if not prev_is_operand:
+                name = toks[k + 2][0]
+                sc.refs.append((st, toks[k + 2][2], name))
+                sc.names.add(name)
+                k += 3
+                continue
+        # `goto * EXPR ;`
+        if t == "goto" and k + 1 < n and toks[k + 1][0] == "*":
+            j = k + 2
+            pd = 0
+            while j < n:
+                jt = toks[j][0]
+                if jt in "([":
+                    pd += 1
+                elif jt in ")]":
+                    pd -= 1
+                elif jt == ";" and pd == 0:
+                    break
+                j += 1
+            if j < n:
+                expr_txt = source[toks[k + 1][2]:toks[j][1]]
+                # Labels referenced *only* inside the dispatch
+                # expression (`goto *(&&base + n)`) are skipped by this
+                # jump; harvest them so they get ids + a case arm.
+                for mm in re.finditer(r"&&\s*([A-Za-z_]\w*)", expr_txt):
+                    sc.names.add(mm.group(1))
+                sc.gotos.append((st, toks[j][2], expr_txt))
+                k = j + 1
+                continue
+        k += 1
+
+    edits: list[tuple[int, int, str]] = []
+    for sc in scopes:
+        if not sc.names:
+            continue
+        ids = {nm: i for i, nm in enumerate(sorted(sc.names))}
+        # `&&L` is rewritten whenever it appears — even if the matching
+        # `goto *` lives in another function (the address is commonly
+        # passed out / stored). The dispatch switch is only emitted
+        # where a `goto *` actually occurs.
+        for st, en, name in sc.refs:
+            edits.append((st, en, f"((void*){ids[name]})"))
+        if not sc.gotos:
+            continue
+        cases = "".join(
+            f"case {ids[nm]}: goto {nm};" for nm in sorted(sc.names)
+        )
+        for st, en, expr in sc.gotos:
+            # `&&L` inside the dispatch expression resolves in the same
+            # id-space; substitute there too so the outer edit owns the
+            # whole statement (overlapping inner ref edits are skipped).
+            for nm, i in ids.items():
+                expr = re.sub(rf"&&\s*{nm}\b", f"((void*){i})", expr)
+            edits.append(
+                (st, en,
+                 f"switch((long)({expr})){{{cases}default:;}}")
+            )
+
+    if not edits:
+        return source
+    edits.sort(key=lambda e: e[0])
+    out: list[str] = []
+    pos = 0
+    for st, en, rep in edits:
+        if st < pos:          # inside an already-applied (goto) edit
+            continue
+        out.append(source[pos:st])
+        out.append(rep)
+        pos = en
+    out.append(source[pos:])
+    return "".join(out)
+
+
 # ---- typedef tracker -------------------------------------------------------
 
 
@@ -766,8 +910,9 @@ def parse(
         if not kr_prepass:
             raise
         rewritten = _rewrite_kr_and_implicit_int(pre)
+        rewritten = _rewrite_computed_goto(rewritten)
         if rewritten == pre:
-            raise  # nothing pre-ANSI here — surface the real error
+            raise  # nothing pre-ANSI / GNU here — surface the real error
         # Fresh typedef-tracker state; the failed attempt left the
         # filter's scan position dirty.
         hooks, filter_ = _make_typedef_filter(seed_typedefs)
