@@ -425,14 +425,32 @@ def declarator_ident(node) -> Optional[str]:
 
 
 def _outermost_fn_declarator(node):
+    """Return the FnDeclarator that defines the function being
+    declared by `node` — its params + variadic-ness. For a plain
+    `int foo(int x)`, the chain has one FnDeclarator and we return
+    it. For a function returning a function pointer like
+    `int (*foo(int x))(int y)`, the chain has TWO FnDeclarators: the
+    OUTERMOST in the syntax tree is the function-pointer's call
+    signature (`[int y]` — part of the *return type*), and the one
+    nested deeper (closer to the identifier) is `foo`'s own
+    (`[int x]`). The semantically-right FnDeclarator for `foo` is
+    the one that directly wraps the identifier (cdecl: read right of
+    the name first), i.e. the LAST FnDeclarator on the .inner chain
+    before reaching the leaf — not the first.
+
+    Returning the wrong one made c-testsuite 00124 fail with
+    `unknown identifier 'a'` (codegen iterated the function-pointer's
+    params and never saw `a`/`b`).
+    """
+    last_fn = None
     while node is not None:
         if isinstance(node, (ast.FnDeclarator, ast.FnDeclaratorEmpty)):
-            return node
+            last_fn = node
         sub = getattr(node, "inner", None)
         if sub is None:
-            return None
+            return last_fn
         node = sub
-    return None
+    return last_fn
 
 
 def _make_synthetic_token(name: str, text: str):
