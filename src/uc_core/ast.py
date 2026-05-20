@@ -184,11 +184,66 @@ def _fd_params(self):
             from .codegen_helpers import ResolvedType
             return ResolvedType(kind="pointer", pointee=pt.element)
         return pt
+    def _expr_has_side_effect(e):
+        # A parameter array dimension is "evaluated" on entry
+        # (C99 6.7.6.3p7), but evaluating a *pure* expression has no
+        # observable effect, so we only need the backend to emit it
+        # when it actually mutates state. Detect ++/--, assignment,
+        # and calls; recurse through the common operand-bearing nodes.
+        if e is None:
+            return False
+        tn = type(e).__name__
+        if tn in ("Call", "CallNoArgs"):
+            return True
+        if tn in ("PostfixOp", "UnaryOp"):
+            op = getattr(getattr(e, "op", None), "text", None)
+            if op in ("++", "--"):
+                return True
+            return _expr_has_side_effect(getattr(e, "operand", None))
+        if tn == "BinaryOp":
+            op = getattr(getattr(e, "op", None), "text", None)
+            if op in ("=", "+=", "-=", "*=", "/=", "%=",
+                      "&=", "|=", "^=", "<<=", ">>="):
+                return True
+            return (_expr_has_side_effect(getattr(e, "left", None))
+                    or _expr_has_side_effect(getattr(e, "right", None)))
+        if tn == "TernaryOp":
+            return any(_expr_has_side_effect(getattr(e, a, None))
+                       for a in ("condition", "true_expr", "false_expr"))
+        for a in ("operand", "expr", "left", "right",
+                  "array", "index", "obj"):
+            if _expr_has_side_effect(getattr(e, a, None)):
+                return True
+        return False
+
+    def _param_size_side_effects(pt):
+        # C99 6.7.6.3p7 / 6.9.1p10: a parameter declared as a
+        # variably-modified array (`T a[i++]`) is adjusted to a
+        # pointer, but its size expression is still evaluated on each
+        # function entry — so an `i++` there must take effect.
+        # `_decay_for_param` drops the size when collapsing to a
+        # pointer; collect the dimension exprs that *have a side
+        # effect* down the array chain so the backend evaluates them.
+        # A pure dimension (`a[N]`, `a[n]`, `a[N+2]`) is evaluated
+        # unobservably — emitting nothing for it is conforming, and
+        # NOT perturbing the huge `T a[CONST]` population is what
+        # keeps this from regressing unrelated compiles.
+        sse = []
+        cur = pt
+        while cur is not None and getattr(cur, "kind", None) == "array":
+            sz = getattr(cur, "size_expr", None)
+            if sz is not None and _expr_has_side_effect(sz):
+                sse.append(sz)
+            cur = cur.element
+        return sse or None
+
     for p in function_params(self):
         if isinstance(p, _cp.ParamDecl):
             _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
-            out.append(_ParamView(declarator_ident(p.declarator),
-                                  resolved_to_legacy(_decay_for_param(pt))))
+            v = _ParamView(declarator_ident(p.declarator),
+                           resolved_to_legacy(_decay_for_param(pt)))
+            v.size_side_effects = _param_size_side_effects(pt)
+            out.append(v)
         elif isinstance(p, _cp.ParamDeclAbstract):
             _, pt = resolve_type_from_decl(p.decl_specs, p.declarator)
             out.append(_ParamView(None,
