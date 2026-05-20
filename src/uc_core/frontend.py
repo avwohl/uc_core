@@ -38,7 +38,7 @@ from .c23_parser import HookRegistry, Token
 
 
 _ATTRIBUTE_RE = re.compile(
-    r"__attribute__\s*\(\(\s*"
+    r"__attribute(?:__)?\s*\(\(\s*"
     r"[^()]*"
     r"(?:\([^()]*\)[^()]*)*"
     r"\)\)"
@@ -86,7 +86,7 @@ _VECTOR_SIZE_RE = re.compile(
     r"(?:(?:unsigned|signed)\s+)?"
     r"(?:char|short|int|long(?:\s+long)?|float|double))"
     r"\s+([A-Za-z_]\w*)"
-    r"\s*__attribute__\s*\(\s*\(\s*(?:__)?vector_size(?:__)?"
+    r"\s*__attribute(?:__)?\s*\(\s*\(\s*(?:__)?vector_size(?:__)?"
     r"\s*\(\s*(\d+)\s*\)\s*\)\s*\)"
 )
 
@@ -101,11 +101,11 @@ _VECTOR_SIZE_RE = re.compile(
 # real consumer today. Extend if a nested packed struct shows up.
 _PACKED_NAMED_STRUCT_RE = re.compile(
     r"\bstruct\s+([A-Za-z_]\w*)\s*\{[^{}]*\}\s*"
-    r"__attribute__\s*\(\s*\(\s*(?:__)?packed(?:__)?\s*\)\s*\)"
+    r"__attribute(?:__)?\s*\(\s*\(\s*(?:__)?packed(?:__)?\s*\)\s*\)"
 )
 _PACKED_TYPEDEF_STRUCT_RE = re.compile(
     r"\btypedef\s+struct\s*(?:[A-Za-z_]\w*\s*)?\{[^{}]*\}\s*"
-    r"__attribute__\s*\(\s*\(\s*(?:__)?packed(?:__)?\s*\)\s*\)\s*"
+    r"__attribute(?:__)?\s*\(\s*\(\s*(?:__)?packed(?:__)?\s*\)\s*\)\s*"
     r"([A-Za-z_]\w*)"
 )
 
