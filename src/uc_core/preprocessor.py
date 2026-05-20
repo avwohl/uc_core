@@ -1101,7 +1101,33 @@ class Preprocessor:
                     continue
 
             # Skip strings and character literals
-            if text[i] in '"\'':
+            # C99 6.10.3.5p7 / 6.4.4.4 / 6.4.5: a string/char literal
+            # is ONE preprocessing token *including* its optional
+            # encoding prefix (`L`, `u`, `U`, `u8`). The prefix is not
+            # subject to macro expansion. Without this, `#define L 1`
+            # would mangle `L'x'` into `1'x'` (gcc-c-torture 970214-1).
+            prefix_len = 0
+            if (
+                i + 1 < len(text)
+                and text[i + 1] in '"\''
+                and text[i] in "LuU"
+            ):
+                prefix_len = 1
+            elif (
+                i + 2 < len(text)
+                and text[i + 2] in '"\''
+                and text[i] == 'u' and text[i + 1] == '8'
+            ):
+                prefix_len = 2
+            # The prefix must not be part of an identifier (it could
+            # be e.g. `Lx'y'` where `Lx` is a name, not a prefix).
+            if prefix_len and i > 0 and (
+                text[i - 1].isalnum() or text[i - 1] == '_'
+            ):
+                prefix_len = 0
+            if text[i] in '"\'' or prefix_len:
+                start = i
+                i += prefix_len
                 quote = text[i]
                 j = i + 1
                 while j < len(text):
@@ -1112,7 +1138,7 @@ class Preprocessor:
                         break
                     else:
                         j += 1
-                result.append(text[i:j])
+                result.append(text[start:j])
                 i = j
                 continue
 
