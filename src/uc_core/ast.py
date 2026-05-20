@@ -71,14 +71,18 @@ TypeofType = _Removed
 LabelAddr = _Removed
 AsmStmt = _Removed
 # Legacy alias: codegens that branch on `ast.Compound` continue to
-# detect the auto-AST's `CompoundLiteral` form. The empty variant
-# (`(T){}`) is also accepted.
+# detect both the auto-AST's `CompoundLiteral` form *and* the empty
+# variant `CompoundLiteralEmpty` (the auto-AST splits `(T){…}` and
+# `(T){}` into distinct node kinds — same present/absent split as
+# Call/CallNoArgs, Member/ArrowMember, CaseStmt/DefaultStmt). Use a
+# tuple so `isinstance(x, ast.Compound)` matches both forms; no
+# call site constructs `ast.Compound(...)` (verified by grep).
 from .c23_parser import (
     CompoundLiteral as _CompoundLiteralForAlias,
     CompoundLiteralEmpty as _CompoundLiteralEmptyForAlias,
     InitializerList as _InitializerListForAlias,
 )
-Compound = _CompoundLiteralForAlias
+Compound = (_CompoundLiteralForAlias, _CompoundLiteralEmptyForAlias)
 
 
 # Legacy `Compound.init` was an InitializerList wrapping the values;
