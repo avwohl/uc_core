@@ -170,6 +170,48 @@ class TypeConfig:
             "__UINT_FAST32_TYPE__":   self._basic_for_size(4, signed=False),
             "__INT_FAST64_TYPE__":    self._basic_for_size(8, signed=True),
             "__UINT_FAST64_TYPE__":   self._basic_for_size(8, signed=False),
+            # Floating-point characterisation macros. uc_core sets
+            # IEEE-754 binary32 / binary64 values for FLT_* / DBL_* but
+            # those assume a 4-byte float and 8-byte double. On uc80
+            # double is 4 bytes — its mantissa is 24 bits, not 53. We
+            # override per-target here so torture tests that gate on
+            # ``__DBL_MANT_DIG__`` pick the right branch.
+            **self._float_chars("__FLT_", self.float_size),
+            **self._float_chars("__DBL_", self.double_size),
+            **self._float_chars("__LDBL_", self.long_double_size),
+        }
+
+    # --- Floating-point ranges (IEEE-754 single / double precision) ---
+    @staticmethod
+    def _float_chars(prefix: str, size: int) -> dict[str, str]:
+        if size == 4:
+            # IEEE-754 binary32 (single precision)
+            return {
+                f"{prefix}RADIX__":      "2",
+                f"{prefix}MANT_DIG__":   "24",
+                f"{prefix}DIG__":        "6",
+                f"{prefix}MIN_EXP__":    "(-125)",
+                f"{prefix}MIN_10_EXP__": "(-37)",
+                f"{prefix}MAX_EXP__":    "128",
+                f"{prefix}MAX_10_EXP__": "38",
+                f"{prefix}MIN__":        "1.17549435e-38F",
+                f"{prefix}MAX__":        "3.40282347e+38F",
+                f"{prefix}EPSILON__":    "1.19209290e-7F",
+            }
+        # IEEE-754 binary64 (double precision); also used for x86 80-bit
+        # long double approximated as binary64 since we don't have an
+        # 80-bit FP runtime.
+        return {
+            f"{prefix}RADIX__":      "2",
+            f"{prefix}MANT_DIG__":   "53",
+            f"{prefix}DIG__":        "15",
+            f"{prefix}MIN_EXP__":    "(-1021)",
+            f"{prefix}MIN_10_EXP__": "(-307)",
+            f"{prefix}MAX_EXP__":    "1024",
+            f"{prefix}MAX_10_EXP__": "308",
+            f"{prefix}MIN__":        "2.2250738585072014e-308",
+            f"{prefix}MAX__":        "1.7976931348623157e+308",
+            f"{prefix}EPSILON__":    "2.2204460492503131e-16",
         }
 
     def _basic_for_size(self, size: int, signed: bool) -> str:

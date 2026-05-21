@@ -89,41 +89,11 @@ class Preprocessor:
         for name, body in self.target_predefines.items():
             self.macros[name] = Macro(name, body=body, is_predefined=True)
 
-        # GCC-style floating-point characterization macros. Values match
-        # IEEE-754 binary32/binary64. These are target-neutral (both uc80
-        # and uc386 use the same float layout); integer-range macros
-        # (``__INT_MAX__`` etc.) are NOT defined here — those depend on
-        # target word size and come via ``target_predefines``.
-        float_macros = {
-            "__FLT_RADIX__": "2",
-            "__FLT_MANT_DIG__": "24",
-            "__FLT_DIG__": "6",
-            "__FLT_MIN_EXP__": "(-125)",
-            "__FLT_MIN_10_EXP__": "(-37)",
-            "__FLT_MAX_EXP__": "128",
-            "__FLT_MAX_10_EXP__": "38",
-            "__FLT_MIN__": "1.17549435e-38F",
-            "__FLT_MAX__": "3.40282347e+38F",
-            "__FLT_EPSILON__": "1.19209290e-7F",
-            "__DBL_MANT_DIG__": "53",
-            "__DBL_DIG__": "15",
-            "__DBL_MIN_EXP__": "(-1021)",
-            "__DBL_MIN_10_EXP__": "(-307)",
-            "__DBL_MAX_EXP__": "1024",
-            "__DBL_MAX_10_EXP__": "308",
-            "__DBL_MIN__": "2.2250738585072014e-308",
-            "__DBL_MAX__": "1.7976931348623157e+308",
-            "__DBL_EPSILON__": "2.2204460492503131e-16",
-            "__LDBL_MANT_DIG__": "53",
-            "__LDBL_DIG__": "15",
-            "__LDBL_MIN__": "2.2250738585072014e-308L",
-            "__LDBL_MAX__": "1.7976931348623157e+308L",
-            "__LDBL_EPSILON__": "2.2204460492503131e-16L",
-            "__CHAR_BIT__": "8",
-            "__SCHAR_MAX__": "127",
-        }
-        for name, body in float_macros.items():
-            self.macros[name] = Macro(name, body=body, is_predefined=True)
+        # __FLT_/__DBL_/__LDBL_ characterisation macros now come from
+        # the backend's ``TypeConfig`` via ``target_predefines`` — they
+        # depend on the configured ``double``/``long double`` sizes
+        # (uc80's ``double`` is 4 bytes, not 8). ``__CHAR_BIT__`` /
+        # ``__SCHAR_MAX__`` likewise live in ``TypeConfig``.
 
         # C23/C24 compliance
         self.macros["__STDC_HOSTED__"] = Macro("__STDC_HOSTED__", body="1", is_predefined=True)
