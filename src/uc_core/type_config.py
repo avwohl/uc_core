@@ -128,6 +128,12 @@ class TypeConfig:
             "__INT_MAX__":          str(self.int_max),
             "__LONG_MAX__":         str(self.long_max) + "L",
             "__LONG_LONG_MAX__":    str(self.long_long_max) + "LL",
+            # Byte-order macros (GCC). uc80 / uc386 are both little-endian.
+            "__ORDER_LITTLE_ENDIAN__": "1234",
+            "__ORDER_BIG_ENDIAN__":    "4321",
+            "__ORDER_PDP_ENDIAN__":    "3412",
+            "__BYTE_ORDER__":          "__ORDER_LITTLE_ENDIAN__",
+            "__FLOAT_WORD_ORDER__":    "__ORDER_LITTLE_ENDIAN__",
             # GCC-style type-name macros used by torture tests and headers
             # to spell size_t / ptrdiff_t / wchar_t without dragging stddef.h.
             "__SIZE_TYPE__":        size_name,
