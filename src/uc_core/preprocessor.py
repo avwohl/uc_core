@@ -77,6 +77,19 @@ class Preprocessor:
         self.macros["__STDC__"] = Macro("__STDC__", body="1", is_predefined=True)
         self.macros["__STDC_VERSION__"] = Macro("__STDC_VERSION__", body="202311L", is_predefined=True)
 
+        # GCC's ``__builtin_offsetof(type, member)`` is the underlying
+        # form of the C ``offsetof`` macro from <stddef.h>. Some torture
+        # tests use the builtin directly to size a sibling struct (e.g.
+        # ``struct B { char a[sizeof(A) - __builtin_offsetof(A, a)]; };``).
+        # Expand it the same way <stddef.h>'s offsetof does — sizeof
+        # of the address arithmetic on a null pointer.
+        self.macros["__builtin_offsetof"] = Macro(
+            "__builtin_offsetof",
+            params=["type", "member"],
+            body="((__SIZE_TYPE__)&((type *)0)->member)",
+            is_predefined=True,
+        )
+
         # Date and time (fixed at preprocessing time)
         date_str = now.strftime("%b %d %Y")
         time_str = now.strftime("%H:%M:%S")
