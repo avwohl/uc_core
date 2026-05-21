@@ -137,6 +137,33 @@ class TypeConfig:
             "__UINTMAX_TYPE__":     "unsigned long long int",
             "__INTPTR_TYPE__":      ptrdiff_name,
             "__UINTPTR_TYPE__":     size_name,
+            # GCC-compatible exact-width typedef macros so source that
+            # references e.g. ``__UINT32_TYPE__`` resolves without a
+            # ``<stdint.h>`` include.
+            "__INT8_TYPE__":          "signed char",
+            "__UINT8_TYPE__":         "unsigned char",
+            "__INT16_TYPE__":         self._basic_for_size(2, signed=True),
+            "__UINT16_TYPE__":        self._basic_for_size(2, signed=False),
+            "__INT32_TYPE__":         self._basic_for_size(4, signed=True),
+            "__UINT32_TYPE__":        self._basic_for_size(4, signed=False),
+            "__INT64_TYPE__":         self._basic_for_size(8, signed=True),
+            "__UINT64_TYPE__":        self._basic_for_size(8, signed=False),
+            "__INT_LEAST8_TYPE__":    "signed char",
+            "__UINT_LEAST8_TYPE__":   "unsigned char",
+            "__INT_LEAST16_TYPE__":   self._basic_for_size(2, signed=True),
+            "__UINT_LEAST16_TYPE__":  self._basic_for_size(2, signed=False),
+            "__INT_LEAST32_TYPE__":   self._basic_for_size(4, signed=True),
+            "__UINT_LEAST32_TYPE__":  self._basic_for_size(4, signed=False),
+            "__INT_LEAST64_TYPE__":   self._basic_for_size(8, signed=True),
+            "__UINT_LEAST64_TYPE__":  self._basic_for_size(8, signed=False),
+            "__INT_FAST8_TYPE__":     "signed char",
+            "__UINT_FAST8_TYPE__":    "unsigned char",
+            "__INT_FAST16_TYPE__":    self._basic_for_size(2, signed=True),
+            "__UINT_FAST16_TYPE__":   self._basic_for_size(2, signed=False),
+            "__INT_FAST32_TYPE__":    self._basic_for_size(4, signed=True),
+            "__UINT_FAST32_TYPE__":   self._basic_for_size(4, signed=False),
+            "__INT_FAST64_TYPE__":    self._basic_for_size(8, signed=True),
+            "__UINT_FAST64_TYPE__":   self._basic_for_size(8, signed=False),
         }
 
     def _basic_for_size(self, size: int, signed: bool) -> str:
