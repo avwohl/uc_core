@@ -226,6 +226,14 @@ class Preprocessor:
         # Set __FILE__ for this file
         self.macros["__FILE__"] = Macro("__FILE__", body=f'"{filename}"', is_predefined=True)
 
+        # Strip UTF-8 BOM if present. Many editors save C++ headers
+        # with a leading BOM (`\xef\xbb\xbf`); real compilers accept
+        # it silently per the implementation-defined behavior in
+        # [lex.charset]. Without this our scanner trips on the BOM
+        # bytes when the file is included transitively.
+        if source.startswith("﻿"):
+            source = source[1:]
+
         # Strip comments up front so multi-line /* */ blocks don't
         # leak macro-expansion into their interior on subsequent lines.
         source = self._strip_comments(source)
@@ -523,6 +531,12 @@ class Preprocessor:
             # them via main.py's surrogateescape read).
             with open(full_path, 'r', errors='surrogateescape') as f:
                 content = f.read()
+
+            # Strip UTF-8 BOM if present (some EASTL/EABase
+            # headers start with one). See preprocess() for the
+            # rationale.
+            if content.startswith("﻿"):
+                content = content[1:]
 
             result = self._preprocess_included(content, full_path, saved_stack_depth)
 
@@ -839,8 +853,15 @@ class Preprocessor:
             if colon_pos == -1:
                 break
 
-            # Find where the condition starts (work backwards from ?)
-            # Stop at operators or unmatched open paren
+            # Find where the condition starts (work backwards from ?).
+            # In C, `?:` has LOWER precedence than every binary
+            # operator except `,` and assignment. So when walking
+            # back from `?`, operators like `==`, `<`, `&&`, `||`,
+            # `+`, etc. are all INSIDE the condition — don't stop
+            # at them. Stop only at:
+            #   * an unmatched `(` (the cond is inside it)
+            #   * `,` (comma operator) at depth 0
+            #   * the start of the expression
             cond_start = 0
             paren_depth = 0
             for i in range(q_pos - 1, -1, -1):
@@ -852,15 +873,13 @@ class Preprocessor:
                         cond_start = i + 1
                         break
                     paren_depth -= 1
-                # Stop at binary operators (but not unary - or !)
-                elif paren_depth == 0 and c in '&|<>=!+-*/%^' and i > 0:
-                    # Check if it's a two-char operator
-                    if expr[i-1:i+1] in ('&&', '||', '<=', '>=', '==', '!='):
-                        cond_start = i + 1
-                        break
+                elif paren_depth == 0 and c == ',':
+                    cond_start = i + 1
+                    break
 
-            # Find where the else part ends
-            # Stop at operators or unmatched close paren
+            # Find where the else part ends. Same precedence
+            # reasoning — keep going past `==`/`<`/etc., stop only
+            # at unmatched `)`, `,`, or end of expression.
             else_end = len(expr)
             paren_depth = 0
             for i in range(colon_pos + 1, len(expr)):
@@ -872,11 +891,9 @@ class Preprocessor:
                         else_end = i
                         break
                     paren_depth -= 1
-                # Stop at binary comparison operators
-                elif paren_depth == 0 and i + 1 < len(expr):
-                    if expr[i:i+2] in ('&&', '||', '<=', '>=', '==', '!='):
-                        else_end = i
-                        break
+                elif paren_depth == 0 and c == ',':
+                    else_end = i
+                    break
 
             cond = expr[cond_start:q_pos].strip()
             then_part = expr[q_pos + 1:colon_pos].strip()
