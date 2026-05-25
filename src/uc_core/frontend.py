@@ -31,7 +31,7 @@ import sys
 
 from . import ast
 from . import c23_parser
-from .c23_parser import HookRegistry, Token
+from .c23_parser import HookRegistry, K, Token
 
 
 # ---- C23 attributes are stripped at the source level -----------------------
@@ -655,29 +655,29 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     # Type-spec keywords whose following IDENT is a declarator name
     # (and therefore shadows the typedef for the enclosing block).
     _TYPESPEC_PREV = frozenset({
-        "KW_VOID", "KW_CHAR", "KW_SHORT", "KW_INT", "KW_LONG",
-        "KW_FLOAT", "KW_DOUBLE", "KW_SIGNED", "KW_UNSIGNED",
-        "KW_BOOL", "KW_COMPLEX", "KW_IMAGINARY", "KW_NULLPTR",
-        "KW_DECIMAL32", "KW_DECIMAL64", "KW_DECIMAL128",
-        "KW_BITINT", "KW_INT128",
+        K.KW_VOID, K.KW_CHAR, K.KW_SHORT, K.KW_INT, K.KW_LONG,
+        K.KW_FLOAT, K.KW_DOUBLE, K.KW_SIGNED, K.KW_UNSIGNED,
+        K.KW_BOOL, K.KW_COMPLEX, K.KW_IMAGINARY, K.KW_NULLPTR,
+        K.KW_DECIMAL32, K.KW_DECIMAL64, K.KW_DECIMAL128,
+        K.KW_BITINT, K.KW_INT128,
     })
     # Combined: contexts where IDENT → TYPEDEF_NAME rewrite is
     # suppressed. Includes the type-spec set plus tag/member
     # namespaces. Tag/member contexts suppress but DON'T shadow.
     _SUPPRESS_PREV = _TYPESPEC_PREV | frozenset({
-        "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
+        K.KW_STRUCT, K.KW_UNION, K.KW_ENUM, K.DOT, K.ARROW,
     })
     # Tokens that, while a type specifier is "open", continue the
     # declarator *prefix* (pointers / type-qualifiers / extra spec
     # keywords) without ending it. A typedef-named IDENT reached
     # through only these is the declarator, not a second type-spec.
     _DECL_CONTINUE = _TYPESPEC_PREV | frozenset({
-        "STAR", "KW_CONST", "KW_VOLATILE", "KW_RESTRICT", "KW_ATOMIC",
+        K.STAR, K.KW_CONST, K.KW_VOLATILE, K.KW_RESTRICT, K.KW_ATOMIC,
     })
     # Previous-token contexts in which an IDENT is *not* a declarator
     # even if a specifier looks open: tag- and member-namespaces.
     _NOT_DECL_PREV = frozenset({
-        "KW_STRUCT", "KW_UNION", "KW_ENUM", "DOT", "ARROW",
+        K.KW_STRUCT, K.KW_UNION, K.KW_ENUM, K.DOT, K.ARROW,
     })
     # state[0] = offset of the currently-being-filtered token
     # state[1] = name of the previously-distinct token (used as `prev`
@@ -700,7 +700,7 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     # The parser may re-query the same offset multiple times during
     # lookahead; only advance state when the offset changes so the
     # `prev` context stays stable for a given token.
-    state = [-1, "", "", "", 0, 0, [], False, set()]
+    state = [-1, K.UNKNOWN, K.UNKNOWN, "", 0, 0, [], False, set()]
 
     def filter_(_ctx, tok: Token) -> Token:
         offset = getattr(tok, "offset", -1)
@@ -708,20 +708,20 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
             # New token: roll previous-distinct into history slots,
             # then update depth counters.
             state[1] = state[2]
-            state[3] = "" if state[1] == "" else state[3]
-            state[2] = tok.name
+            state[3] = "" if state[1] is K.UNKNOWN else state[3]
+            state[2] = tok.kind
             state[0] = offset
             # When we close a brace, drop any shadow set whose
             # entry-depth matches the brace count we just exited.
-            if tok.name == "RBRACE":
+            if tok.kind is K.RBRACE:
                 state[5] -= 1
                 while state[6] and state[6][-1][0] > state[5]:
                     state[6].pop()
-            elif tok.name == "LBRACE":
+            elif tok.kind is K.LBRACE:
                 state[5] += 1
-            elif tok.name == "LPAREN":
+            elif tok.kind is K.LPAREN:
                 state[4] += 1
-            elif tok.name == "RPAREN":
+            elif tok.kind is K.RPAREN:
                 state[4] = max(0, state[4] - 1)
             # ---- specifier / declarator-name disambiguation ---------
             # In a declaration the *first* specifier establishes the
@@ -735,14 +735,14 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
             # are valid (the 2nd `T` is a member/parameter/local).
             # This also covers the original ``int byte`` keyword case
             # (a concrete type keyword opens the specifier too).
-            prev_nm = state[1]
+            prev_kind = state[1]
             base_shadowed = any(tok.text in s for _d, s in state[6])
-            is_td_ident = tok.name == "IDENT" and tok.text in names
+            is_td_ident = tok.kind is K.IDENT and tok.text in names
             # Would this token, on its own, act as a type specifier
             # (i.e. be rewritten to TYPEDEF_NAME)?
             emits_typedef = (
                 is_td_ident
-                and prev_nm not in _SUPPRESS_PREV
+                and prev_kind not in _SUPPRESS_PREV
                 and not base_shadowed
             )
             declarator_here = (
@@ -752,7 +752,7 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
                 # Inside a signature (paren_depth >= 1) or a block
                 # (brace_depth >= 1); file-scope typedef declarations
                 # stay unshadowed.
-                and prev_nm not in _NOT_DECL_PREV
+                and prev_kind not in _NOT_DECL_PREV
             )
             if declarator_here:
                 # The declarator name shadows the typedef for the
@@ -765,21 +765,21 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
                 state[6][-1][1].add(tok.text)
                 state[8].add(offset)
                 state[7] = False               # declarator consumed
-            elif emits_typedef or tok.name in _TYPESPEC_PREV:
+            elif emits_typedef or tok.kind in _TYPESPEC_PREV:
                 state[7] = True                # a type specifier
-            elif state[7] and tok.name in _DECL_CONTINUE:
+            elif state[7] and tok.kind in _DECL_CONTINUE:
                 pass                           # still in declarator prefix
             else:
                 state[7] = False               # specifier context ended
-        prev_name = state[1]
+        prev_kind = state[1]
         # Walk the shadow stack: if any frame contains this name, the
         # IDENT is shadowed; don't rewrite. A forced declarator offset
         # is likewise kept as IDENT.
         shadowed = any(tok.text in s for _d, s in state[6])
         if (
-            tok.name == "IDENT"
+            tok.kind is K.IDENT
             and tok.text in names
-            and prev_name not in _SUPPRESS_PREV
+            and prev_kind not in _SUPPRESS_PREV
             and not shadowed
             and offset not in state[8]
         ):
@@ -790,6 +790,7 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
                 column=tok.column,
                 offset=tok.offset,
                 file_id=tok.file_id,
+                kind=K.TYPEDEF_NAME,
             )
         return tok
 
