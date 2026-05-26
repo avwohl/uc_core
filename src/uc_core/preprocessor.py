@@ -1405,7 +1405,11 @@ class Preprocessor:
             pattern = rf'(?<!#)#\s*{re.escape(param)}\b'
             # Stringify the argument
             stringified = '"' + arg.replace('\\', '\\\\').replace('"', '\\"') + '"'
-            body = re.sub(pattern, stringified, body)
+            # Pass the replacement as a lambda so `re.sub` doesn't
+            # interpret `\\` in `stringified` as a back-reference and
+            # silently drop a backslash. (`r'\\'` in the replacement
+            # means a literal `\` to re.sub.)
+            body = re.sub(pattern, lambda m, s=stringified: s, body)
         return body
 
     def _handle_token_pasting(self, body: str, params: list[str], args: list[str]) -> str:
