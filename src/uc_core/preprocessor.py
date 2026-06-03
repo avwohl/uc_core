@@ -441,6 +441,12 @@ class Preprocessor:
 
         if name == 'include':
             return self._process_include(args)
+        elif name == 'include_next':
+            # GCC/Clang extension: start the include search AFTER the
+            # directory containing the file that issued the directive.
+            # Used by libc++ wrappers (e.g. its own `stddef.h` does
+            # `#include_next <stddef.h>` to chain to the system one).
+            return self._process_include(args, skip_current_dir=True)
         elif name == 'define':
             return self._process_define(args)
         elif name == 'undef':
@@ -461,8 +467,10 @@ class Preprocessor:
             raise PreprocessorError(f"Unknown directive: #{name}",
                                    self.current_file, self.current_line)
 
-    def _process_include(self, args: str) -> str:
-        """Process #include directive."""
+    def _process_include(self, args: str, skip_current_dir: bool = False) -> str:
+        """Process #include directive. `skip_current_dir=True` implements
+        the `#include_next` semantic: start searching AFTER the
+        directory that contained the file issuing the directive."""
         args = args.strip()
 
         # Determine include type and filename
@@ -486,39 +494,31 @@ class Preprocessor:
             raise PreprocessorError(f"Invalid #include syntax: {args}",
                                    self.current_file, self.current_line)
 
-        # Period DOS sources sometimes use Windows-style backslashes:
-        # `#include <sys\stat.h>`. Normalize to forward slashes for
-        # the host filesystem.
-        if "\\" in filename:
-            filename = filename.replace("\\", "/")
-        # Search for file. Period DOS code mixes case freely
-        # (`#include "global.h"` next to a real file `GLOBAL.H`); after
-        # the exact-match pass, fall back to a case-insensitive scan
-        # of each search dir so DOS-era sources work on case-sensitive
-        # hosts.
-        full_path = None
-        for path in search_paths:
-            candidate = os.path.join(path, filename) if path else filename
-            if os.path.exists(candidate):
-                full_path = candidate
-                break
-        if full_path is None:
-            target_lower = filename.lower()
-            for path in search_paths:
-                base = path or "."
-                try:
-                    entries = os.listdir(base)
-                except OSError:
-                    continue
-                for entry in entries:
-                    if entry.lower() == target_lower:
-                        full_path = os.path.join(path, entry)
-                        break
-                if full_path is not None:
-                    break
-        if full_path is not None:
-            full_path = os.path.abspath(full_path)
+        # `#include_next`: drop search paths up to and including the
+        # directory holding the current file. Lets libc++'s own
+        # `stddef.h` chain through to the system's `stddef.h`.
+        if skip_current_dir:
+            current_dir = (
+                os.path.abspath(os.path.dirname(self.current_file))
+                if self.current_file else None
+            )
+            if current_dir is not None:
+                pruned = []
+                seen_current = False
+                for p in search_paths:
+                    if (not seen_current
+                            and os.path.abspath(p) == current_dir):
+                        seen_current = True
+                        continue
+                    if seen_current:
+                        pruned.append(p)
+                search_paths = pruned
 
+        # Resolve against the search paths (exact match, then a
+        # case-insensitive scan for DOS-era sources; backslash-
+        # normalized). Shared with `__has_include` so both agree.
+        full_path = self._search_for_include(filename, search_paths)
+        if full_path is not None:
             # Save current state
             saved_file = self.current_file
             saved_line = self.current_line
@@ -549,6 +549,100 @@ class Preprocessor:
 
         raise PreprocessorError(f"Cannot find include file: {filename}",
                                self.current_file, self.current_line)
+
+    def _search_for_include(self, filename: str,
+                            search_paths: list[str]) -> Optional[str]:
+        """Resolve a header name against ``search_paths``.
+
+        Returns the absolute path of the first match — exact first,
+        then a case-insensitive scan so DOS-era sources that mix case
+        (`#include "global.h"` next to a real `GLOBAL.H`) work on
+        case-sensitive hosts — or ``None`` if not found. Windows-style
+        backslashes in the name are normalized to forward slashes.
+        """
+        if "\\" in filename:
+            filename = filename.replace("\\", "/")
+        for path in search_paths:
+            candidate = os.path.join(path, filename) if path else filename
+            if os.path.exists(candidate):
+                return os.path.abspath(candidate)
+        target_lower = filename.lower()
+        for path in search_paths:
+            base = path or "."
+            try:
+                entries = os.listdir(base)
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.lower() == target_lower:
+                    return os.path.abspath(os.path.join(path, entry))
+        return None
+
+    def _has_include_file(self, args: str, *,
+                          skip_current_dir: bool = False) -> bool:
+        """Back the `__has_include(<h>)` / `__has_include("h")` operator
+        (and the `__has_include_next` GCC/Clang extension).
+
+        Resolves the header name exactly like `#include` would —
+        angle-bracket names search only the include-path list,
+        quoted names also search the current file's directory — and
+        returns whether the file exists. `skip_current_dir=True`
+        implements `__has_include_next` (start after the directory of
+        the file issuing the query)."""
+        args = args.strip()
+        if args.startswith('<'):
+            end = args.find('>')
+            if end == -1:
+                return False
+            filename = args[1:end]
+            search_paths = list(self.include_paths)
+        elif args.startswith('"'):
+            end = args.find('"', 1)
+            if end == -1:
+                return False
+            filename = args[1:end]
+            search_paths = [os.path.dirname(self.current_file)] + self.include_paths
+        else:
+            return False
+        if skip_current_dir:
+            current_dir = (
+                os.path.abspath(os.path.dirname(self.current_file))
+                if self.current_file else None
+            )
+            if current_dir is not None:
+                pruned = []
+                seen_current = False
+                for p in search_paths:
+                    if (not seen_current
+                            and os.path.abspath(p) == current_dir):
+                        seen_current = True
+                        continue
+                    if seen_current:
+                        pruned.append(p)
+                search_paths = pruned
+        return self._search_for_include(filename, search_paths) is not None
+
+    def _expand_has_include(self, expr: str) -> str:
+        """Replace `__has_include(...)` / `__has_include_next(...)` in a
+        `#if`/`#elif` expression with `1` or `0` based on whether the
+        named header resolves. Must run BEFORE macro expansion (the
+        `<h>` / `"h"` header-name argument is not macro-expanded) and
+        before the generic `IDENT(...)->0` elision in
+        `_evaluate_condition`."""
+        # `__has_include_next` first (the longer name) so the
+        # `__has_include` pattern doesn't match its prefix.
+        expr = re.sub(
+            r'__has_include_next\s*\(\s*(<[^>]*>|"[^"]*")\s*\)',
+            lambda m: '1' if self._has_include_file(
+                m.group(1), skip_current_dir=True) else '0',
+            expr,
+        )
+        expr = re.sub(
+            r'__has_include\s*\(\s*(<[^>]*>|"[^"]*")\s*\)',
+            lambda m: '1' if self._has_include_file(m.group(1)) else '0',
+            expr,
+        )
+        return expr
 
     @staticmethod
     def _strip_directive_comments(text: str) -> str:
@@ -751,6 +845,11 @@ class Preprocessor:
         if not expr:
             raise PreprocessorError("Empty condition in #if",
                                    self.current_file, self.current_line)
+
+        # Handle __has_include(<h>) / __has_include_next(...) BEFORE
+        # macro expansion (the header-name argument is not expanded)
+        # and before the generic IDENT(...)->0 elision below.
+        expr = self._expand_has_include(expr)
 
         # Handle defined() and defined NAME
         expr = self._expand_defined(expr)
