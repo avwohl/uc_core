@@ -276,7 +276,8 @@ class Preprocessor:
                 # Regular line - expand macros
                 # Join subsequent lines if a function-like macro invocation
                 # has unclosed parentheses spanning multiple lines
-                while i + 1 < len(lines) and self._has_unclosed_macro_call(line):
+                while (i + 1 < len(lines)
+                       and self._has_unclosed_macro_call(line, lines[i + 1])):
                     i += 1
                     line = line + '\n' + lines[i]
                 expanded = self._expand_macros(line)
@@ -292,8 +293,31 @@ class Preprocessor:
 
         return '\n'.join(output_lines)
 
-    def _has_unclosed_macro_call(self, text: str) -> bool:
+    def _has_unclosed_macro_call(self, text: str,
+                                 next_line: "str | None" = None) -> bool:
         """Check if text contains a function-like macro name followed by unclosed parens.
+
+        [cpp.replace] puts NO line constraint between a function-like macro's
+        NAME and its `(` -- only whitespace, and a newline IS whitespace. Boost
+        relies on that:
+
+            BOOST_STATIC_CONSTANT
+              (bool,
+               value = ((sizeof(F) <= sizeof(function_buffer) && ...)));
+
+        The paren scan below only skipped ' ' and '\t', and this predicate is
+        called per LINE, so a macro name ending a line looked "closed", the
+        caller never merged the next line, and the invocation survived
+        UNEXPANDED. In boost that silently deleted the `value` member of
+        function_allows_small_object_optimization, which then read TRUE as a
+        template argument and FALSE in an `if` -- boost::function stored its
+        functor inline and read it back as an obj_ptr, and Boost.Test crashed
+        calling through the result.
+
+        `next_line` (when supplied) is consulted ONLY for that end-of-line case,
+        and only to confirm the continuation REALLY opens with `(`. Without that
+        check a bare macro name at end of line -- legal, and NOT an invocation --
+        would make the caller swallow the following line, `#directive` included.
 
         Skips over string / char literals AND `//` line and `/* */` block
         comments — apostrophes inside a comment ("viewer's") would otherwise
@@ -306,9 +330,19 @@ class Preprocessor:
             if name in self.macros and self.macros[name].params is not None:
                 # Found a function-like macro - check if parens are unclosed
                 pos = m.end()
-                # Skip whitespace
-                while pos < len(text) and text[pos] in ' \t':
+                # Skip whitespace. NEWLINES COUNT: once the caller has merged a
+                # continuation line, `text` holds "NAME\n   (args..." and the
+                # name is followed by '\n', not a space. Accepting only ' \t'
+                # made this predicate report "closed" on the very first merged
+                # line, so the merge loop stopped after ONE line and the
+                # invocation stayed unexpanded anyway.
+                while pos < len(text) and text[pos] in ' \t\n\r':
                     pos += 1
+                if pos >= len(text) and next_line is not None:
+                    # Name ends the line: an invocation only if the NEXT line
+                    # opens with '(' (comments/blank prefix stripped).
+                    if next_line.lstrip().startswith('('):
+                        return True
                 if pos < len(text) and text[pos] == '(':
                     # Count parens from here
                     depth = 0
@@ -386,7 +420,8 @@ class Preprocessor:
                 # follow-on lines onto the head before _expand_macros
                 # runs. The top-level preprocess() loop does this; the
                 # included-file path was missing the same merge.
-                while i + 1 < len(lines) and self._has_unclosed_macro_call(line):
+                while (i + 1 < len(lines)
+                       and self._has_unclosed_macro_call(line, lines[i + 1])):
                     i += 1
                     line = line + '\n' + lines[i]
                 expanded = self._expand_macros(line)
