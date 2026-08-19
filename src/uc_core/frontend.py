@@ -51,7 +51,22 @@ _C23_ATTR_RE = re.compile(r"\[\[[^\]]*\]\]")
 # 386 headers) sprays them everywhere; they have no meaning under
 # flat-32 / Z80 so we erase them at the source level. See
 # tests/test_dos_tolerance.py for the canonical case list.
+# The unprefixed spellings are ordinary identifiers in C -- C23 has no such
+# keywords -- so erasing one wherever it appears takes the user's name with
+# it.  The lookahead below keeps most uses safe (a name followed by ``;``,
+# ``=`` or ``(`` is never a qualifier), but it cannot tell ``struct huge mk``
+# from ``near int n``: both are the word followed by another word.  Erasing
+# the first leaves ``struct mk(void)``, which does not parse, and the error
+# points at the line rather than the name.  A tag position is matched first
+# and put back verbatim.
+_DOS_BARE_QUALIFIERS = (
+    "near|far|huge|cdecl|pascal|stdcall|fastcall|syscall|watcall"
+    "|fortran|interrupt"
+)
+
 _DOS_QUALIFIER_RE = re.compile(
+    r"(?P<keep>\b(?:struct|union|enum)\s+(?:" + _DOS_BARE_QUALIFIERS + r")\b)"
+    r"|"
     r"\b(?:"
     r"(?:__|_)(?:near|far|huge)"
     r"|(?:__|_)(?:cs|ds|es|ss|seg)"
@@ -60,9 +75,13 @@ _DOS_QUALIFIER_RE = re.compile(
     r"|__extension__"
     r")\b"
     r"|"
-    r"\b(?:near|far|huge|cdecl|pascal|stdcall|fastcall|syscall|watcall"
-    r"|fortran|interrupt)\b(?=\s+[A-Za-z_*])"
+    r"\b(?:" + _DOS_BARE_QUALIFIERS + r")\b(?=\s+[A-Za-z_*])"
 )
+
+
+def _drop_dos_qualifier(m: "re.Match") -> str:
+    """Erase the qualifier, except where it was a struct/union/enum tag."""
+    return m.group("keep") or ""
 
 # ``__based(seg)`` / ``__Seg16(...)`` — keyword + parenthesised
 # argument list to discard together. Caller counts parens by hand
@@ -157,7 +176,7 @@ def _strip_attributes(source: str, vector_names: set | None = None) -> str:
         source = _ATTRIBUTE_RE.sub(" ", source)
     source = _C23_ATTR_RE.sub(" ", source)
     source = _strip_dos_paren_qualifiers(source)
-    source = _DOS_QUALIFIER_RE.sub("", source)
+    source = _DOS_QUALIFIER_RE.sub(_drop_dos_qualifier, source)
     return source
 
 

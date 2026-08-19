@@ -106,3 +106,71 @@ def test_watcall_function_parses_like_cdecl():
     plain_params = plain_fn.params.params if isinstance(plain_fn.params, ast.VariadicParams) else plain_fn.params
     watcall_params = watcall_fn.params.params if isinstance(watcall_fn.params, ast.VariadicParams) else watcall_fn.params
     assert len(plain_params) == len(watcall_params)
+
+
+# The unprefixed spellings are ordinary identifiers in C -- C23 has no
+# near/far/huge -- so absorbing one has to stop at the places a program can
+# legitimately use the word.  A tag is the case the qualifier rule could not
+# see: `struct huge mk(void)` is the word followed by another word, exactly
+# like `near int n`, and erasing it left `struct mk(void)`, which does not
+# parse.  The error then named the line, not the identifier, so it read as a
+# compiler fault rather than a reserved name.
+TAG_NAME_CASES = [
+    ("struct tag",              "struct huge { int a; };"),
+    ("struct tag in decl",      "struct huge { int a; }; struct huge v;"),
+    ("struct tag as return",    "struct far { int a; }; struct far f(void);"),
+    ("union tag",               "union near { int a; char b; };"),
+    ("enum tag",                "enum huge { E1, E2 };"),
+    ("tag through a pointer",   "struct huge { int a; }; struct huge *p;"),
+    ("tag as a parameter",      "struct far { int a; }; void f(struct far *p);"),
+    ("cdecl as a tag",          "struct cdecl { int a; }; struct cdecl v;"),
+    ("interrupt as a tag",      "struct interrupt { int a; }; struct interrupt v;"),
+]
+
+
+@pytest.mark.parametrize("label,src", TAG_NAME_CASES,
+                         ids=[c[0] for c in TAG_NAME_CASES])
+def test_qualifier_words_survive_in_tag_position(label, src):
+    unit = _parse(src)
+    assert unit is not None
+    assert unit.items
+
+
+def test_tag_keeps_its_name():
+    """Parsing is not enough -- the tag has to still be called `huge`, or a
+    later `struct huge` reference resolves to nothing."""
+    unit = _parse("struct huge { int a; };")
+    decl = unit.items[0]
+    assert "huge" in str(decl), decl
+
+
+@pytest.mark.parametrize("word", ["huge", "far", "near", "cdecl", "interrupt"])
+def test_a_variable_of_such_a_type_is_still_a_variable(word):
+    """The quiet half of the bug, and the worse one.  Erasing the tag out of
+    `struct huge v;` leaves `struct v;` -- a forward declaration of a struct
+    called v.  That parses, so nothing was reported; the variable simply
+    stopped existing, and the error landed later on whatever used it.  A
+    declaration that declares something has a declarator; the wreckage has
+    an empty list."""
+    unit = _parse("struct %s { int a; }; struct %s v;" % (word, word))
+    decl = unit.items[1]
+    assert decl.declarators, (
+        "the declarator was erased along with the tag: %r" % (decl,))
+    assert "v" in str(decl.declarators[0])
+
+
+def test_qualifier_after_a_tag_is_still_absorbed():
+    """Only the word directly after struct/union/enum is a tag.  In
+    `struct foo far *p` the far is a real qualifier and must still go, or
+    DOS headers stop parsing."""
+    unit = _parse("struct foo { int a; }; struct foo far *p;")
+    assert unit is not None
+    assert len(unit.items) == 2
+
+
+def test_a_tag_named_far_can_still_take_a_far_pointer():
+    """Both at once: the first far names the struct, the second qualifies
+    the pointer."""
+    unit = _parse("struct far { int a; }; struct far far *p;")
+    assert unit is not None
+    assert len(unit.items) == 2
