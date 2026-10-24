@@ -6,6 +6,19 @@ All notable changes to uc_core land here. Format follows
 surface (the `uc_core` Python API, the AST node shapes re-exported from
 `uc_core.ast`, and the preprocessor).
 
+## 0.4.2
+
+### Fixed
+
+- **A label may precede an `asm(...)` statement.** `L: asm("nop");` was a
+  parse error: the grammar (`c23.uplox` in uplox) took a label only before
+  a statement or a declaration, and `asm` is an `asm_declaration` block
+  item. C23 6.8.2 lets a label precede any statement. `c23.json` and
+  `c23_parser.py` are regenerated from the changed grammar; the label node
+  is a `LabelStmt` whose `stmt` is the `AsmDeclaration`. Found by the
+  whetstone benchmark of uc80, whose timer macro is a label followed by
+  an asm statement.
+
 ## 0.4.1 — 2026-08-20
 
 Three fixes for cases where uc_core silently produced the wrong program
