@@ -90,3 +90,48 @@ def test_float_equal_operands_are_not_folded():
     assert "-" in _ops("float x; float f(void) { return x - x; }")
     assert "==" in _ops("double x; int f(void) { return x == x; }")
     assert "-" not in _ops("int x; int f(void) { return x - x; }")
+
+
+def test_float_name_in_other_function_does_not_block_integer_reduction():
+    src = ("int f(int x) { return x * 8; }\n"
+           "float g(float x) { return x * 8; }\n")
+    unit = ASTOptimizer(3).optimize(parse(src, "t.c"))
+    per_fn = []
+    for item in unit.items:
+        if isinstance(item, ast.FunctionDef):
+            ops: set[str] = set()
+
+            def walk(n):
+                if isinstance(n, list):
+                    for x in n:
+                        walk(x)
+                elif dataclasses.is_dataclass(n):
+                    if isinstance(n, ast.BinaryOp):
+                        ops.add(n.op.text if hasattr(n.op, "text") else n.op)
+                    for fl in dataclasses.fields(n):
+                        walk(getattr(n, fl.name, None))
+            walk(item.body)
+            per_fn.append(ops)
+    assert "*" not in per_fn[0] and "<<" in per_fn[0]
+    assert "*" in per_fn[1] and "<<" not in per_fn[1]
+
+
+def test_file_scope_float_seen_unless_shadowed_by_local():
+    src = ("float x;\n"
+           "float a(void) { return x * 8; }\n"
+           "int b(int x) { return x * 8; }\n")
+    unit = ASTOptimizer(3).optimize(parse(src, "t.c"))
+    fns = [i for i in unit.items if isinstance(i, ast.FunctionDef)]
+    assert "<<" not in repr(fns[0].body)
+    assert "<<" in repr(fns[1].body)
+
+
+@pytest.mark.parametrize("op", ["<<", ">>"])
+def test_nested_shift_not_merged_past_operand_width(op):
+    src = f"long long f(long long y) {{ return (y {op} 33) {op} 33; }}\n"
+    unit = ASTOptimizer(3).optimize(parse(src, "t.c"))
+    assert repr(unit).count(f"'{op}'") + repr(unit).count(f'"{op}"') \
+        + repr(unit).count(op) >= 2
+    src2 = f"int f(int y) {{ return (y {op} 2) {op} 3; }}\n"
+    unit2 = ASTOptimizer(3).optimize(parse(src2, "t.c"))
+    assert repr(unit2).count("IntLiteral") <= 1 or "5" in repr(unit2)

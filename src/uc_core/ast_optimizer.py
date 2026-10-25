@@ -224,6 +224,7 @@ class ASTOptimizer:
         if isinstance(decl, ast.FunctionDef):
             if decl.body is not None:
                 self._vol_names = self._vol.names_for(decl)
+                self._float.enter(decl)
                 if self.opt_level >= 3:
                     self._reset_level3_state()
                     # Track parameter names + a conservative type key
@@ -232,6 +233,7 @@ class ASTOptimizer:
                         self._var_types[name] = tkey
                     self._collect_address_taken(decl.body)
                 self._optimize_stmt(decl.body)
+                self._float.leave()
                 self._vol_names = self._vol.file_names
         elif isinstance(decl, ast.Declaration):
             # A Declaration may carry zero or many init_declarators.
@@ -1093,6 +1095,8 @@ class ASTOptimizer:
             # (x << c1) << c2 → x << (c1 + c2)
             if op == "<<" and inner_op == "<<":
                 combined = c1 + c2
+                if combined >= 16:     # operand width unknown: may be 0/fill
+                    return None
                 self._stat("nested_fold")
                 self._changed = True
                 return _binop("<<", x, make_int_lit(combined))
@@ -1100,6 +1104,8 @@ class ASTOptimizer:
             # (x >> c1) >> c2 → x >> (c1 + c2)
             if op == ">>" and inner_op == ">>":
                 combined = c1 + c2
+                if combined >= 16:
+                    return None
                 self._stat("nested_fold")
                 self._changed = True
                 return _binop(">>", x, make_int_lit(combined))

@@ -10,6 +10,15 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Fixed
 
+- **Float detection is scoped to the function.** A float `x` in one
+  function no longer stops `x * 8` becoming a shift on an integer `x` in
+  another function (uc386 lost `shl` and `lea` that way).  A name declared
+  in a function now takes its type from that function; other names take
+  the file-scope declaration.
+- **`(x << a) << b` and `(x >> a) >> b` are not merged when `a + b` is 16
+  or more.**  The merge ignored the operand width, so
+  `(y << 33) << 33` on a `long long` gave 4 and not 0.
+
 - **The AST optimizer no longer applies integer-only rewrites to a float.**
   `x * 8` became `x << 3`, `x / 8u` became `x >> 3`, `(x * 3) * 5` folded
   to an integer constant that wraps in 16 bits, `x - x` and `x == x` folded

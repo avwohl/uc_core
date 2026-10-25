@@ -11,9 +11,14 @@ whose declared type is (or may be) floating: objects, functions,
 parameters and struct members declared with ``float``, ``double``,
 ``long double`` or the like, directly or through a typedef, as a
 pointer or array of such, or with ``typeof``.  ``maybe_float`` then
-answers for an expression.  The test is name-based and one-sided: a
-name declared floating anywhere counts as floating at every use, so
-shadowing can only cost an optimization, never a wrong rewrite.  An
+answers for an expression.  The test is name-based and one-sided.
+Inside a function, a name declared in that function (parameter or
+local, in any block) is floating when any such declaration is floating;
+any other name is floating when the file-scope declaration is.  Two
+blocks of one function that declare the same name with different types
+count as floating, which can only cost an optimization, never a wrong
+rewrite.  Call ``enter`` with a function definition before the queries
+of that function and ``leave`` after.  An
 integer-valued operator (comparison, ``%``, shift, bit operator, ``!``),
 a cast to an integer or pointer type, ``sizeof`` and the arguments of a
 call do not make their expression floating.
@@ -22,7 +27,7 @@ call do not make their expression floating.
 from __future__ import annotations
 
 from . import ast
-from .volatility import _is_node, _text, children, declared_names
+from .volatility import _fn_params, _is_node, _text, children, declared_names
 
 _FLOAT_KW = ("float", "double")
 
@@ -38,8 +43,27 @@ class FloatInfo:
         self.typedefs: set[str] = set()   # typedef names of floating types
         self.names: set[str] = set()      # objects and functions
         self.fields: set[str] = set()     # struct and union members
+        # Per function: (floating locals, all locals), by id(FunctionDef).
+        self._local: dict[int, tuple[set[str], set[str]]] = {}
+        self._cur: tuple[set[str], set[str]] | None = None
         if tu is not None:
-            self._walk(tu)
+            self._walk_unit(tu)
+
+    def enter(self, fn) -> None:
+        """Queries now refer to the body of function definition ``fn``."""
+        self._cur = self._local.get(id(fn))
+
+    def leave(self) -> None:
+        self._cur = None
+
+    def _name_float(self, name: str) -> bool:
+        cur = self._cur
+        if cur is not None:
+            if name in cur[0]:
+                return True
+            if name in cur[1]:
+                return False
+        return name in self.names
 
     # ---- type tests
 
@@ -96,7 +120,7 @@ class FloatInfo:
             if cls == "FloatLiteral":
                 return True
             if cls == "Identifier":
-                if _text(n.name) in self.names:
+                if self._name_float(_text(n.name)):
                     return True
                 continue
             if cls in ("Member", "ArrowMember"):
@@ -128,25 +152,44 @@ class FloatInfo:
 
     # ---- collection
 
-    def _walk(self, root) -> None:
+    def _walk_unit(self, tu) -> None:
+        for item in getattr(tu, "items", None) or []:
+            if type(item).__name__ in ("FunctionDef", "_FunctionDef"):
+                if self.specs_float(item.decl_specs or []):
+                    self.names.update(declared_names(item.declarator))
+                lf: set[str] = set()
+                la: set[str] = set()
+                for p in _fn_params(item.declarator):
+                    la.update(declared_names(getattr(p, "declarator", None)))
+                self._local[id(item)] = (lf, la)
+                self._walk(item.declarator, lf, la)
+                self._walk(item.body, lf, la)
+            else:
+                self._walk(item, self.names, None)
+
+    def _walk(self, root, flt: set, allnames) -> None:
         stack = [root]
         while stack:
             n = stack.pop()
             cls = type(n).__name__
             if cls == "Declaration":
                 specs = n.decl_specs or []
-                if self.specs_float(specs):
-                    is_td = any(type(s).__name__ == "StorageClass"
-                                and _text(s.kw) == "typedef" for s in specs)
-                    for d in n.declarators or []:
-                        (self.typedefs if is_td else self.names).update(
-                            declared_names(d))
-            elif cls in ("FunctionDef", "_FunctionDef"):
-                if self.specs_float(n.decl_specs or []):
-                    self.names.update(declared_names(n.declarator))
+                is_td = any(type(s).__name__ == "StorageClass"
+                            and _text(s.kw) == "typedef" for s in specs)
+                isf = self.specs_float(specs)
+                for d in n.declarators or []:
+                    nm = declared_names(d)
+                    if is_td:
+                        if isf:
+                            self.typedefs.update(nm)
+                    else:
+                        if allnames is not None:
+                            allnames.update(nm)
+                        if isf:
+                            flt.update(nm)
             elif cls in ("ParamDecl", "ParamDeclAbstract"):
                 if self.specs_float(n.decl_specs or []):
-                    self.names.update(declared_names(n.declarator))
+                    flt.update(declared_names(n.declarator))
             elif cls == "StructMember":
                 if self.specs_float(n.decl_specs or []):
                     for d in n.declarators or []:
