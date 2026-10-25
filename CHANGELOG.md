@@ -25,6 +25,27 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
   Names that only contain the words, tags (`struct interrupt`) and string
   literals are not affected. The default is off; uc386 behaviour is unchanged.
 
+### Fixed
+
+- **The AST optimizer no longer removes, merges or repeats an access to a
+  volatile object (C23 6.7.3).** It deleted adjacent stores to a volatile
+  global, static, extern, local or typedef object (`g = 1; g = 2;`), a
+  declaration initializer of a volatile object whose volatility came from
+  a typedef or a pointer qualifier, and a store whose right side read a
+  volatile object. It folded `v == v`, `v | v`, `(a | v) | v` and
+  `v % 1`, turned `v * 2` into `v + v` (and, once guarded, into `v << 1`, which is
+  wrong for a float; the multiply now stays), merged equal volatile reads
+  through common subexpression elimination and copy propagation, and
+  unrolled `for (volatile int i = 0; ...)`. The new module
+  `uc_core.volatility` collects the names, typedefs, struct tags and
+  struct members that are declared volatile (also through typedefs, pointer
+  qualifiers and array element types); `ASTOptimizer.optimize` builds the
+  table, and the optimizer keeps one test, `_touches_volatile`, for every
+  rewrite that drops, repeats or merges an operand. `VolatileInfo` is
+  public for other passes (uc80 uses it in its code generator). Code that
+  mentions no volatile object is optimized as before. uc386 gets the fix
+  with no change.
+
 ## 0.4.2
 
 ### Fixed

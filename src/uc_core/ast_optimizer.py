@@ -27,6 +27,7 @@ from ._const import int_value, int_flags, make_int_lit, char_value
 from .c23_parser import Token
 from .codegen_helpers import make_identifier
 from .type_config import TypeConfig, Z80_CPM
+from .volatility import VolatileInfo
 
 
 def _iv(lit):
@@ -178,9 +179,27 @@ class ASTOptimizer:
         # _decl_type_key / _types_compatible_for_copy.
         self._var_types: dict[str, str | None] = {}
         self._address_taken_vars: set[str] = set()
+        # Volatile objects (see volatility.py): every pass that drops,
+        # merges, duplicates or reorders an access must ask
+        # `_touches_volatile` first.  An empty table says "nothing is
+        # volatile", the right answer for a pass run without `optimize`.
+        self._vol = VolatileInfo()
+        self._vol_names = self._vol.file_names
+
+    def _touches_volatile(self, expr) -> bool:
+        """May `expr` access a volatile object (C23 6.7.3)?"""
+        return self._vol.touches(expr, self._vol_names)
+
+    def _expr_is_impure(self, expr) -> bool:
+        """Side effects, or a volatile access: an expression that may not
+        be dropped, duplicated or merged with an equal one."""
+        return (self._expr_has_side_effects(expr)
+                or self._touches_volatile(expr))
 
     def optimize(self, tu: ast.TranslationUnit) -> ast.TranslationUnit:
         """Optimize all expressions in the translation unit (multi-pass)."""
+        self._vol = VolatileInfo(tu)
+        self._vol_names = self._vol.file_names
         max_passes = 5
         for _ in range(max_passes):
             self._changed = False
@@ -195,6 +214,7 @@ class ASTOptimizer:
     def _optimize_decl(self, decl) -> None:
         if isinstance(decl, ast.FunctionDef):
             if decl.body is not None:
+                self._vol_names = self._vol.names_for(decl)
                 if self.opt_level >= 3:
                     self._reset_level3_state()
                     # Track parameter names + a conservative type key
@@ -203,6 +223,7 @@ class ASTOptimizer:
                         self._var_types[name] = tkey
                     self._collect_address_taken(decl.body)
                 self._optimize_stmt(decl.body)
+                self._vol_names = self._vol.file_names
         elif isinstance(decl, ast.Declaration):
             # A Declaration may carry zero or many init_declarators.
             # Each ``InitDeclaratorWithInit`` has an initializer expression
@@ -590,7 +611,9 @@ class ASTOptimizer:
             return r
 
         # === Self-referential identities (only for side-effect-free operands) ===
-        if self._is_same_identifier(left, right):
+        # A volatile object is read twice, not once.
+        if (self._is_same_identifier(left, right)
+                and not self._touches_volatile(left)):
             if op == "&" or op == "|":
                 self._stat("self_identity")
                 self._changed = True
@@ -732,10 +755,14 @@ class ASTOptimizer:
             return None
 
         shift = self._log2_if_power_of_2(val)
+        if shift == 1 and self._touches_volatile(other):
+            # x + x would read the object twice and x << 1 is wrong for a
+            # float: leave the multiply to the code generator.
+            return None
         if shift is not None:
             self._stat("mul_to_shift")
             self._changed = True
-            if shift == 1 and not self._expr_has_side_effects(other):
+            if shift == 1 and not self._expr_is_impure(other):
                 # x * 2 → x + x (single ADD HL,HL).
                 # Skip when `other` has side effects — duplicating a
                 # `(n += 5)` or function-call operand would fire the
@@ -811,7 +838,7 @@ class ASTOptimizer:
                 result = left
         elif op == "%":
             # x % 1 → 0  (only when x is side-effect-free)
-            if r_one and not self._expr_has_side_effects(left):
+            if r_one and not self._expr_is_impure(left):
                 self._stat("identity")
                 self._changed = True
                 return make_int_lit(0)
@@ -850,8 +877,8 @@ class ASTOptimizer:
 
         l_zero = isinstance(left, ast.IntLiteral) and _iv(left) == 0
         r_zero = isinstance(right, ast.IntLiteral) and _iv(right) == 0
-        l_pure = not self._expr_has_side_effects(left)
-        r_pure = not self._expr_has_side_effects(right)
+        l_pure = not self._expr_is_impure(left)
+        r_pure = not self._expr_is_impure(right)
 
         if op == "*":
             if (r_zero and l_pure) or (l_zero and r_pure):
@@ -940,6 +967,8 @@ class ASTOptimizer:
 
         # (a OP b) OP b → a OP b   (for & and |)
         if op in ("&", "|") and isinstance(left, ast.BinaryOp) and _op(left) == op:
+            if self._touches_volatile(right):
+                return None          # (a | v) | v reads v twice
             if self._is_same_identifier(right, left.right):
                 self._stat("idempotent")
                 self._changed = True
@@ -1496,6 +1525,8 @@ class ASTOptimizer:
         key = self._expr_key(expr)
         if key is None:
             return expr  # Not a pure expression
+        if self._touches_volatile(expr):
+            return expr  # Every volatile read must happen
 
         if key in self._cse_cache:
             self._stat("cse")
@@ -1620,6 +1651,8 @@ class ASTOptimizer:
         if (target in self._address_taken_vars
                 or source in self._address_taken_vars):
             return False
+        if target in self._vol_names or source in self._vol_names:
+            return False
         t1 = self._var_types.get(target)
         t2 = self._var_types.get(source)
         return t1 is not None and t1 == t2
@@ -1659,7 +1692,8 @@ class ASTOptimizer:
                         and first_target == second_target):
                     second_rhs = self._get_assign_rhs(second)
                     if (first_rhs is not None
-                            and not self._expr_has_side_effects(first_rhs)
+                            and not self._expr_is_impure(first_rhs)
+                            and first_target not in self._vol_names
                             and second_rhs is not None
                             and not self._expr_references_var(second_rhs, first_target)
                             and not self._expr_has_pointer_or_call(second_rhs)):
@@ -1752,6 +1786,8 @@ class ASTOptimizer:
                 return None
             var_name = _idname(init.left)
             start_val = _iv(init.right)
+            if var_name in self._vol_names:
+                return None
         elif isinstance(init, ast.Declaration):
             with_init = [d for d in (init.declarators or [])
                          if isinstance(d, ast.InitDeclaratorWithInit)]
@@ -1761,7 +1797,7 @@ class ASTOptimizer:
             if not isinstance(d.init, ast.IntLiteral):
                 return None
             var_name = _declarator_ident(d.declarator)
-            if var_name is None:
+            if var_name is None or var_name in self._vol_names:
                 return None
             start_val = _iv(d.init)
             init_decl = init  # re-emit once so `var` stays declared
