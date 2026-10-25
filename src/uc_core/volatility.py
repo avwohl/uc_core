@@ -133,6 +133,11 @@ class VolatileInfo:
         stack = [expr]
         while stack:
             n = stack.pop()
+            if isinstance(n, (list, tuple)):        # adjacent string pieces
+                stack.extend(n)
+                continue
+            if not _is_node(n):
+                continue
             cls = type(n).__name__
             if cls == "Identifier":
                 if _text(n.name) in names:
@@ -156,7 +161,10 @@ class VolatileInfo:
         stack = list(root) if isinstance(root, (list, tuple)) else [root]
         while stack:
             n = stack.pop()
-            if n is None:
+            if isinstance(n, (list, tuple)):
+                stack.extend(n)
+                continue
+            if not _is_node(n):
                 continue
             cls = type(n).__name__
             if cls == "TypeQualifier":

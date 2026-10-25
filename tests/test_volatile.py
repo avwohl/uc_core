@@ -231,3 +231,9 @@ def test_no_volatile_in_the_unit_changes_nothing():
     # the dead store is gone and the loop unrolled
     assert _assigns(tu, "f") == 1 + 1 + 3   # r = 2; s = ...; i = 0, 1, 2
     assert _count(tu, "f", ast.ForStmt) == 0
+
+
+def test_adjacent_string_literals_and_other_nodes_do_not_crash_the_analysis():
+    tu = _optimize(PRELUDE + 'void f(void){ const char *t = "x" "y"; r = sizeof("a" "b");'
+                   ' gi = (int)(long)t; gi = 2; }')
+    assert _assigns(tu, "f") == 3
