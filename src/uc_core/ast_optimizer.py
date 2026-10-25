@@ -27,6 +27,7 @@ from ._const import int_value, int_flags, make_int_lit, char_value
 from .c23_parser import Token
 from .codegen_helpers import make_identifier
 from .type_config import TypeConfig, Z80_CPM
+from .floatness import FloatInfo
 from .volatility import VolatileInfo
 
 
@@ -185,6 +186,13 @@ class ASTOptimizer:
         # volatile", the right answer for a pass run without `optimize`.
         self._vol = VolatileInfo()
         self._vol_names = self._vol.file_names
+        # Names that may have a floating type (floatness.py): the
+        # integer-only rewrites must not fire on such an operand.
+        self._float = FloatInfo()
+
+    def _maybe_float(self, expr) -> bool:
+        """May `expr` be a float, double or long double?"""
+        return self._float.maybe_float(expr)
 
     def _touches_volatile(self, expr) -> bool:
         """May `expr` access a volatile object (C23 6.7.3)?"""
@@ -200,6 +208,7 @@ class ASTOptimizer:
         """Optimize all expressions in the translation unit (multi-pass)."""
         self._vol = VolatileInfo(tu)
         self._vol_names = self._vol.file_names
+        self._float = FloatInfo(tu)
         max_passes = 5
         for _ in range(max_passes):
             self._changed = False
@@ -583,7 +592,8 @@ class ASTOptimizer:
         # === Strength reduction: divide/modulo by power-of-2 (unsigned only) ===
         if op == "/" and isinstance(right, ast.IntLiteral):
             shift = self._log2_if_power_of_2(_iv(right))
-            if shift is not None and self._is_unsigned_literal(left, right):
+            if (shift is not None and self._is_unsigned_literal(left, right)
+                    and not self._maybe_float(left)):
                 self._stat("div_to_shift")
                 self._changed = True
                 return _binop(">>", left, make_int_lit(shift))
@@ -612,8 +622,11 @@ class ASTOptimizer:
 
         # === Self-referential identities (only for side-effect-free operands) ===
         # A volatile object is read twice, not once.
+        # x - x and x == x are not 0 and 1 for a float (NaN, infinity),
+        # and the integer 0 has the wrong type for it.
         if (self._is_same_identifier(left, right)
-                and not self._touches_volatile(left)):
+                and not self._touches_volatile(left)
+                and not self._maybe_float(left)):
             if op == "&" or op == "|":
                 self._stat("self_identity")
                 self._changed = True
@@ -744,7 +757,7 @@ class ASTOptimizer:
                     return None
             else:
                 return None
-        if _expr_has_float(other):
+        if _expr_has_float(other) or self._maybe_float(other):
             return None
 
         val = _iv(const)
@@ -819,6 +832,10 @@ class ASTOptimizer:
             and not _literal_promotes(right, left)
         )
 
+        # x + 0 is not x for a float x of -0.0.
+        if op == "+" and (self._maybe_float(left) or self._maybe_float(right)):
+            return None
+
         result = None
         if op == "+":
             if r_zero:
@@ -879,6 +896,11 @@ class ASTOptimizer:
         r_zero = isinstance(right, ast.IntLiteral) and _iv(right) == 0
         l_pure = not self._expr_is_impure(left)
         r_pure = not self._expr_is_impure(right)
+
+        # x * 0 and 0 / x of a float are a float (and NaN for infinity).
+        if op in ("*", "/") and (self._maybe_float(left)
+                                 or self._maybe_float(right)):
+            return None
 
         if op == "*":
             if (r_zero and l_pure) or (l_zero and r_pure):
@@ -989,6 +1011,11 @@ class ASTOptimizer:
         left = expr.left
 
         if not isinstance(right, ast.IntLiteral):
+            return None
+
+        # Reassociating (f + 1) + 2 or (f * 3) * 5 changes the rounding
+        # of a float, and the wrapped constant is an integer's.
+        if self._maybe_float(left):
             return None
 
         c2 = _iv(right)
