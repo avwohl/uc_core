@@ -65,6 +65,10 @@ class Preprocessor:
         self.macro_stack: dict[str, list[Optional[Macro]]] = {}  # For push_macro/pop_macro
         self.printf_features: set[str] | None = None  # From #pragma printf
         self.scanf_features: set[str] | None = None   # From #pragma scanf
+        # From #pragma uc80 <verb> <args>: (verb, [args], file, line) in
+        # source order.  The preprocessor only records them; the compiler
+        # driver decides what a verb means (keep, public, vector).
+        self.target_pragmas: list[tuple[str, list[str], str, int]] = []
 
         # Initialize predefined macros
         self._init_predefined_macros()
@@ -1659,6 +1663,14 @@ class Preprocessor:
                     self.scanf_features = features
                 else:
                     self.scanf_features |= features
+            return None
+
+        # Handle #pragma uc80 <verb> <args>: recorded for the driver.
+        match = re.match(r'uc80\s+([A-Za-z_]\w*)\s*(.*)$', args)
+        if match:
+            words = [w for w in re.split(r'[\s,]+', match.group(2).strip()) if w]
+            self.target_pragmas.append(
+                (match.group(1), words, self.current_file, self.current_line))
             return None
 
         # Other pragmas are ignored
