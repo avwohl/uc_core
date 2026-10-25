@@ -156,6 +156,66 @@ def _rewrite_vector_size(source: str, vector_names: set | None = None) -> str:
     return _VECTOR_SIZE_RE.sub(repl, source)
 
 
+# ---- strict mode: refuse to erase constructs the target cannot honour -------
+#
+# Tolerant mode (the default, used by uc386) erases ``interrupt`` and
+# ``fastcall`` markers because they mean nothing on flat-32.  A target
+# for which they DO mean something (a Z80 ROM: interrupt handlers need
+# RETI/EI and register saves) must not lose them silently.  With
+# ``strict_unsupported=True`` the scan below raises
+# :class:`UnsupportedConstructError` instead.
+
+_DEFAULT_UNSUPPORTED_MESSAGE = "'{name}' is not supported"
+
+_STRICT_ATTR_WORD_RE = re.compile(r"\b(?:__)?interrupt(?:__)?\b")
+_STRICT_TOKEN_RE = re.compile(
+    r"(?P<skip>\"(?:[^\"\\\n]|\\.)*\"|'(?:[^'\\\n]|\\.)*')"
+    r"|(?P<gnu>__attribute(?:__)?\s*\(\(\s*[^()]*(?:\([^()]*\)[^()]*)*\)\))"
+    r"|(?P<c23>\[\[[^\]]*\]\])"
+    r"|(?P<keep>\b(?:struct|union|enum)\s+(?:" + _DOS_BARE_QUALIFIERS + r")\b)"
+    r"|(?P<prefixed>\b(?:__|_)(?:interrupt|fastcall)\b)"
+    r"|(?P<bare>\b(?:interrupt|fastcall)\b(?=\s+[A-Za-z_*]))"
+)
+
+
+class UnsupportedConstructError(Exception):
+    """A construct tolerant mode would erase is refused in strict mode.
+
+    ``str(exc)`` is ``file:line: message``.  ``line`` counts lines of the
+    preprocessed text handed to :func:`parse` (the preprocessor emits no
+    line markers), which equals the source line when no ``#include`` or
+    multi-line macro comes before the construct.
+    """
+
+    def __init__(self, filename: str, line: int, name: str, message: str):
+        self.filename = filename
+        self.line = line
+        self.name = name
+        self.message = message
+        super().__init__(f"{filename}:{line}: {message}")
+
+
+def _check_strict_unsupported(source: str, filename: str, template: str) -> None:
+    """Raise UnsupportedConstructError for the first interrupt / fastcall
+    marker that tolerant mode would erase.  Identifiers that merely
+    contain the words (interrupt_count) and struct/union/enum tags are
+    not markers.  String and character literals are skipped."""
+    for m in _STRICT_TOKEN_RE.finditer(source):
+        kind = m.lastgroup
+        name = None
+        if kind in ("gnu", "c23"):
+            if _STRICT_ATTR_WORD_RE.search(m.group(0)):
+                name = ("__attribute__((interrupt))" if kind == "gnu"
+                        else "[[interrupt]]")
+        elif kind in ("prefixed", "bare"):
+            name = m.group(0)
+        if name is None:
+            continue
+        line = source.count("\n", 0, m.start()) + 1
+        raise UnsupportedConstructError(
+            filename, line, name, template.format(name=name))
+
+
 def _strip_attributes(source: str, vector_names: set | None = None) -> str:
     """Strip GCC ``__attribute__`` and C23 ``[[...]]`` attributes, plus
     period DOS-era qualifier keywords (near/far/huge/__cdecl/__pascal/
@@ -873,6 +933,8 @@ def parse(
     filename: str = "<stdin>",
     seed_typedefs: set[str] | None = None,
     kr_prepass: bool = False,
+    strict_unsupported: bool = False,
+    unsupported_message: str = _DEFAULT_UNSUPPORTED_MESSAGE,
 ) -> ast.TranslationUnit:
     """Parse already-preprocessed C source into a typed AST.
 
@@ -883,6 +945,14 @@ def parse(
     (implicit-int returns + K&R parameter lists -> ANSI). Off by
     default so modern code pays zero cost; hosts compiling old code
     (e.g. the gcc-c-torture corpus) opt in explicitly.
+
+    ``strict_unsupported=True`` turns the silent erasure of ``interrupt``
+    / ``fastcall`` markers (``__interrupt``, ``interrupt``,
+    ``_interrupt``, ``[[...interrupt...]]``, ``__attribute__((interrupt))``,
+    bare ``__fastcall`` / ``_fastcall`` / ``fastcall``) into an
+    :class:`UnsupportedConstructError` with ``file:line``.
+    ``unsupported_message`` is a ``str.format`` template with ``{name}``;
+    a host sets it to its own wording.  Default is off: tolerant.
 
     ``seed_typedefs`` pre-populates the typedef tracker with names a
     host knows about from system headers it processed out-of-band
@@ -906,6 +976,8 @@ def parse(
     # tag name; a typedef struct is keyed by the typedef name. The
     # parser builds the AST with no `is_packed` flag on either shape,
     # so we re-attach it below.
+    if strict_unsupported:
+        _check_strict_unsupported(source, filename, unsupported_message)
     packed_tag_names: set[str] = set()
     packed_typedef_names: set[str] = set()
     for m in _PACKED_NAMED_STRUCT_RE.finditer(source):

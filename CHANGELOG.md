@@ -6,6 +6,19 @@ All notable changes to uc_core land here. Format follows
 surface (the `uc_core` Python API, the AST node shapes re-exported from
 `uc_core.ast`, and the preprocessor).
 
+## Unreleased
+
+### Added
+
+- **Opt-in strict mode in `frontend.parse`.** `parse(..., strict_unsupported=True)`
+  raises `UnsupportedConstructError` (`file:line: message`) for `__interrupt`,
+  `_interrupt`, bare `interrupt`, `[[...interrupt...]]`,
+  `__attribute__((interrupt))` and `__fastcall` / `_fastcall` / `fastcall`,
+  where tolerant mode erases them silently. `unsupported_message` is a
+  `str.format` template with `{name}`, so each host picks its own wording.
+  Names that only contain the words, tags (`struct interrupt`) and string
+  literals are not affected. The default is off; uc386 behaviour is unchanged.
+
 ## 0.4.2
 
 ### Fixed
