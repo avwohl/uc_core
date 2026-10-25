@@ -16,7 +16,8 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
   declaration initializer of a volatile object whose volatility came from
   a typedef or a pointer qualifier, and a store whose right side read a
   volatile object. It folded `v == v`, `v | v`, `(a | v) | v` and
-  `v % 1`, turned `v * 2` into `v + v`, merged equal volatile reads
+  `v % 1`, turned `v * 2` into `v + v` (and, once guarded, into `v << 1`, which is
+  wrong for a float; the multiply now stays), merged equal volatile reads
   through common subexpression elimination and copy propagation, and
   unrolled `for (volatile int i = 0; ...)`. The new module
   `uc_core.volatility` collects the names, typedefs, struct tags and

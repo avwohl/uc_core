@@ -194,6 +194,13 @@ def test_times_two_does_not_read_twice():
                if isinstance(x, ast.Identifier)) == 1
 
 
+def test_times_two_of_a_volatile_object_stays_a_multiply():
+    # x << 1 would be wrong for a volatile float.
+    tu = _optimize(PRELUDE + "int f(void){ return gi * 2; }")
+    assert _count(tu, "f", ast.BinaryOp, "*") == 1
+    assert _count(tu, "f", ast.BinaryOp, "<<") == 0
+
+
 def test_times_two_of_a_plain_object_becomes_an_add():
     tu = _optimize(PRELUDE + "int f(void){ return r * 2; }")
     assert _count(tu, "f", ast.BinaryOp, "+") == 1

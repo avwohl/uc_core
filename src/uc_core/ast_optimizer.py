@@ -755,6 +755,10 @@ class ASTOptimizer:
             return None
 
         shift = self._log2_if_power_of_2(val)
+        if shift == 1 and self._touches_volatile(other):
+            # x + x would read the object twice and x << 1 is wrong for a
+            # float: leave the multiply to the code generator.
+            return None
         if shift is not None:
             self._stat("mul_to_shift")
             self._changed = True
