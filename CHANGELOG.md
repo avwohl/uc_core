@@ -27,6 +27,20 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Fixed
 
+- **Copy propagation at level 3 follows the side effects of declaration
+  initialisers and of the parts of an expression.** `int a = v; int b = a++;
+  return a;` returned `v`. Each declarator now takes effect in order, so
+  `int a = v, b = a++, c = a;` is right. The search for effects covers casts,
+  subscripts, initialiser lists, `&&`, `||`, `?:`, statement expressions and
+  member stores. A sequence point inside one expression (`(a++ > 0) && a`),
+  and the condition of an `if`, kill the copy before the later reads.
+- **A conditional store makes no copy.** `c && (x = y); return x;` read `x`
+  as `y`. A branch of `if` no longer sees the copies of the other branch, and
+  a label or a `case` clears the copies when the walk enters it.
+- **Copies follow block scope.** `{ int i = ..; o = i; } return o;` returned a
+  name that was out of scope. A declaration with no initialiser, and a block
+  that hides an outer name, now kill the copies of that name. An initialiser
+  of a `static` local is no copy.
 - **Float detection is scoped to the function.** A float `x` in one
   function no longer stops `x * 8` becoming a shift on an integer `x` in
   another function (uc386 lost `shl` and `lea` that way).  A name declared
@@ -74,6 +88,12 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
   public for other passes (uc80 uses it in its code generator). Code that
   mentions no volatile object is optimized as before. uc386 gets the fix
   with no change.
+
+### Changed
+
+- **`_fold_ternary` hook.** The constant-condition fold of `?:` is a method, so
+  a back end can refuse the fold without its own walk of the operands. The
+  walk of the operands now sits in one place with the sequence-point rules.
 
 ## 0.4.2
 

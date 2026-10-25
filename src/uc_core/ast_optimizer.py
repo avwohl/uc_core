@@ -62,6 +62,7 @@ def _idname(ident) -> str:
 # node-split as IfStmt/IfStmtElse. A no-arg call still has side
 # effects, so both must be matched everywhere a call is analysed.
 _CALL = (ast.Call, ast.CallNoArgs)
+_MISSING = object()
 
 # The auto-AST splits member access into Member (`.`) and ArrowMember
 # (`->`) — the same present/absent node-split as Call/CallNoArgs.
@@ -180,6 +181,8 @@ class ASTOptimizer:
         # _decl_type_key / _types_compatible_for_copy.
         self._var_types: dict[str, str | None] = {}
         self._address_taken_vars: set[str] = set()
+        # True while a function body is walked (level-3 state is valid).
+        self._in_function = False
         # Volatile objects (see volatility.py): every pass that drops,
         # merges, duplicates or reorders an access must ask
         # `_touches_volatile` first.  An empty table says "nothing is
@@ -232,21 +235,36 @@ class ASTOptimizer:
                     for name, tkey in _function_param_typekeys(decl.declarator):
                         self._var_types[name] = tkey
                     self._collect_address_taken(decl.body)
+                self._in_function = True
                 self._optimize_stmt(decl.body)
+                self._in_function = False
                 self._float.leave()
                 self._vol_names = self._vol.file_names
         elif isinstance(decl, ast.Declaration):
             # A Declaration may carry zero or many init_declarators.
             # Each ``InitDeclaratorWithInit`` has an initializer expression
             # we want to fold; ``InitDeclarator`` has none.
+            # The declarators run in order, so at level 3 each one
+            # records its effect (see _note_declarator) before the next
+            # initialiser is optimised: ``int a = v, b = a++, c = a;``
+            # must not read ``a`` as ``v`` in ``c``.
+            track = self.opt_level >= 3 and self._in_function
             for init_decl in decl.declarators or []:
                 if isinstance(init_decl, ast.InitDeclaratorWithInit):
                     init_decl.init = self._optimize_expr(init_decl.init)
+                if track:
+                    self._note_declarator(decl, init_decl)
 
     # === Statement walkers (with dead code elimination) ===
 
     def _optimize_stmt(self, stmt: ast.Statement) -> None:
+        if (self.opt_level >= 3
+                and isinstance(stmt, (ast.LabelStmt,) + _CASE)):
+            # A jump can reach a label or a case from anywhere, so no
+            # copy or cached expression holds when it is entered.
+            self._clear_all_caches()
         if isinstance(stmt, ast.CompoundStmt):
+            scope = self._enter_scope(stmt) if self.opt_level >= 3 else None
             new_items: list = []
             replaced = False  # a 1:1 substitution (e.g. loop unroll)
             unreachable = False
@@ -301,6 +319,7 @@ class ASTOptimizer:
             # Level 3: dead store elimination on the final list
             if self.opt_level >= 3:
                 stmt.items = self._eliminate_dead_stores(stmt.items)
+                self._leave_scope(scope)
 
         elif isinstance(stmt, ast.ExpressionStmt):
             if stmt.expr is not None:
@@ -350,8 +369,15 @@ class ASTOptimizer:
                         if else_b is not None:
                             self._optimize_stmt(else_b)
             else:
+                if self.opt_level >= 3:
+                    # The condition ran before either branch; the else
+                    # branch starts from the state before the then branch.
+                    self._invalidate_caches_for_expr(stmt.condition)
+                    snap = self._snapshot()
                 self._optimize_stmt(stmt.then_branch)
                 if else_b is not None:
+                    if self.opt_level >= 3:
+                        self._restore(snap)
                     self._optimize_stmt(else_b)
 
         elif isinstance(stmt, ast.WhileStmt):
@@ -387,8 +413,11 @@ class ASTOptimizer:
             stmt.condition = self._optimize_expr(stmt.condition)
 
         elif isinstance(stmt, ast.ForStmt):
+            for_scope = None
             if stmt.init is not None:
                 if isinstance(stmt.init, ast.Declaration):
+                    if self.opt_level >= 3:
+                        for_scope = self._enter_scope(stmt.init)
                     self._optimize_decl(stmt.init)
                 else:
                     stmt.init = self._optimize_expr(stmt.init)
@@ -406,6 +435,8 @@ class ASTOptimizer:
             self._optimize_stmt(stmt.body)
             if self.opt_level >= 3:
                 self._clear_all_caches()
+                if for_scope is not None:
+                    self._leave_scope(for_scope)
 
         elif isinstance(stmt, ast.SwitchStmt):
             stmt.expr = self._optimize_expr(stmt.expr)
@@ -470,7 +501,16 @@ class ASTOptimizer:
                 expr.right = self._optimize_expr(expr.right)
                 return self._optimize_binary(expr)
             expr.left = self._optimize_expr(expr.left)
-            expr.right = self._optimize_expr(expr.right)
+            if self.opt_level >= 3 and _op(expr) in ("&&", "||"):
+                # Sequence point: the left operand has run.  The right
+                # operand may not run, so its effects only kill.
+                self._invalidate_caches_for_expr(expr.left)
+                snap = self._snapshot()
+                expr.right = self._optimize_expr(expr.right)
+                self._restore(snap)
+                self._invalidate_caches_for_expr(expr.right, True)
+            else:
+                expr.right = self._optimize_expr(expr.right)
             result = self._optimize_binary(expr)
             # Level 3: CSE after binary optimization
             if self.opt_level >= 3:
@@ -488,14 +528,21 @@ class ASTOptimizer:
             return result
         elif isinstance(expr, ast.TernaryOp):
             expr.condition = self._optimize_expr(expr.condition)
-            expr.true_expr = self._optimize_expr(expr.true_expr)
-            expr.false_expr = self._optimize_expr(expr.false_expr)
-            # Constant condition folding
-            if isinstance(expr.condition, ast.IntLiteral):
-                self._stat("ternary_fold")
-                self._changed = True
-                return expr.true_expr if _iv(expr.condition) != 0 else expr.false_expr
-            return expr
+            if self.opt_level >= 3:
+                # Sequence point after the condition; each branch starts
+                # from that state and its effects only kill afterwards.
+                self._invalidate_caches_for_expr(expr.condition)
+                snap = self._snapshot()
+                expr.true_expr = self._optimize_expr(expr.true_expr)
+                self._restore(snap)
+                expr.false_expr = self._optimize_expr(expr.false_expr)
+                self._restore(snap)
+                self._invalidate_caches_for_expr(expr.true_expr, True)
+                self._invalidate_caches_for_expr(expr.false_expr, True)
+            else:
+                expr.true_expr = self._optimize_expr(expr.true_expr)
+                expr.false_expr = self._optimize_expr(expr.false_expr)
+            return self._fold_ternary(expr)
         elif isinstance(expr, _CALL):
             if isinstance(expr, ast.Call):
                 expr.args = [self._optimize_expr(a) for a in expr.args]
@@ -533,6 +580,15 @@ class ASTOptimizer:
             # safe to map over every value here.
             expr.values = [self._optimize_expr(v) for v in expr.values]
             return expr
+        return expr
+
+    def _fold_ternary(self, expr: ast.TernaryOp) -> ast.Expression:
+        """Constant condition folding; the three operands are optimised.
+        A back end that knows the types of the branches may refuse."""
+        if isinstance(expr.condition, ast.IntLiteral):
+            self._stat("ternary_fold")
+            self._changed = True
+            return expr.true_expr if _iv(expr.condition) != 0 else expr.false_expr
         return expr
 
     # === Binary operation optimizer ===
@@ -1594,27 +1650,8 @@ class ASTOptimizer:
         if isinstance(item, ast.ExpressionStmt) and item.expr is not None:
             self._invalidate_caches_for_expr(item.expr)
         elif isinstance(item, ast.Declaration):
-            for d in item.declarators or []:
-                decl = getattr(d, "declarator", None)
-                if decl is None:
-                    continue
-                nm = _declarator_ident(decl)
-                if nm is None:
-                    continue
-                # Record the declared type for *every* declarator (even
-                # without an initializer) so a later `nm = y;` can be
-                # copy-tracked too.
-                self._var_types[nm] = _decl_type_key(item.decl_specs, decl)
-                if not isinstance(d, ast.InitDeclaratorWithInit):
-                    continue
-                # The initializer assigns nm.
-                self._invalidate_cse_for_var(nm)
-                self._invalidate_copies_for_var(nm)
-                # Track copy `nm = y` when the types are identical.
-                if isinstance(d.init, ast.Identifier):
-                    src = _idname(d.init)
-                    if self._types_compatible_for_copy(nm, src):
-                        self._copies[nm] = src
+            # Recorded declarator by declarator in _optimize_decl.
+            pass
         elif isinstance(item, (ast.IfStmt, ast.IfStmtElse, ast.WhileStmt,
                                ast.DoWhileStmt, ast.ForStmt, ast.SwitchStmt)):
             # Control flow structures: conservatively clear caches
@@ -1622,25 +1659,134 @@ class ASTOptimizer:
         elif isinstance(item, (ast.ReturnStmt, ast.ReturnStmtValue, ast.GotoStmt)):
             self._clear_all_caches()
 
-    def _invalidate_caches_for_expr(self, expr: ast.Expression) -> None:
-        """Invalidate CSE/copy caches based on side effects in an expression."""
+    def _snapshot(self):
+        return (dict(self._copies), dict(self._cse_cache),
+                {k: set(v) for k, v in self._cse_deps.items()})
+
+    def _restore(self, snap) -> None:
+        copies, cse, deps = snap
+        self._copies = dict(copies)
+        self._cse_cache = dict(cse)
+        self._cse_deps = {k: set(v) for k, v in deps.items()}
+
+    @staticmethod
+    def _declared_names(decl) -> list[str]:
+        names = []
+        for d in decl.declarators or []:
+            decl_ = getattr(d, "declarator", None)
+            nm = _declarator_ident(decl_) if decl_ is not None else None
+            if nm is not None:
+                names.append(nm)
+        return names
+
+    def _enter_scope(self, node):
+        """Names a block (or a for-init declaration) declares, with the
+        types of the same names outside, for _leave_scope."""
+        decls = [node] if isinstance(node, ast.Declaration) else [
+            i for i in node.items if isinstance(i, ast.Declaration)]
+        names = [n for d in decls for n in self._declared_names(d)]
+        return [(n, self._var_types.get(n, _MISSING)) for n in names]
+
+    def _leave_scope(self, scope) -> None:
+        """The names of a closed block are out of scope: no copy may
+        name them (``{ int i = ..; o = i; }  return o;`` must not become
+        ``return i``), and an outer variable of the same name gets its
+        type back."""
+        for name, old in scope or []:
+            self._invalidate_copies_for_var(name)
+            self._invalidate_cse_for_var(name)
+            if old is _MISSING:
+                self._var_types.pop(name, None)
+            else:
+                self._var_types[name] = old
+
+    @staticmethod
+    def _decl_is_static(decl) -> bool:
+        for sp in decl.decl_specs or []:
+            if type(sp).__name__ == "StorageClass":
+                if getattr(sp.kw, "text", "") in ("static", "extern",
+                                                  "thread_local",
+                                                  "_Thread_local"):
+                    return True
+        return False
+
+    def _note_declarator(self, decl, d) -> None:
+        """Level 3: the effect of one declarator, after its initialiser.
+
+        The initialiser runs first, so its side effects (``b = a++``,
+        ``b = f()``, ``b = (a = 5)``) kill what they change; then the
+        declared name is a new object: every copy and cached expression
+        that names it dies (also when it has no initialiser, which
+        matters for a block that hides a name of an outer block).
+        """
+        init = getattr(d, "init", None)
+        if isinstance(d, ast.InitDeclaratorWithInit) and init is not None:
+            self._invalidate_caches_for_expr(init)
+        declr = getattr(d, "declarator", None)
+        if declr is None:
+            return
+        nm = _declarator_ident(declr)
+        if nm is None:
+            return
+        self._var_types[nm] = _decl_type_key(decl.decl_specs, declr)
+        self._invalidate_cse_for_var(nm)
+        self._invalidate_copies_for_var(nm)
+        if not isinstance(d, ast.InitDeclaratorWithInit):
+            return
+        # A static object is initialised once, not on each entry.
+        if isinstance(init, ast.Identifier) and not self._decl_is_static(decl):
+            src = _idname(init)
+            if src != nm and self._types_compatible_for_copy(nm, src):
+                self._copies[nm] = src
+
+    def _invalidate_caches_for_expr(self, expr, conditional: bool = False) -> None:
+        """Update the CSE/copy caches for the side effects of ``expr``.
+
+        ``conditional`` is true for a part that may not run (the right
+        operand of ``&&`` and ``||``, a branch of ``?:``): it can kill a
+        copy but it must not make one.  Every expression node is
+        searched, so ``(int)(a++)``, ``t[a++]`` and ``{a++, 1}`` count.
+        """
+        if expr is None:
+            return
+        if isinstance(expr, (list, tuple)):
+            for e in expr:
+                self._invalidate_caches_for_expr(e, conditional)
+            return
         if isinstance(expr, ast.BinaryOp):
-            if _op(expr) in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
-                           "^=", "<<=", ">>="):
-                if isinstance(expr.left, ast.Identifier):
-                    name = _idname(expr.left)
+            op = _op(expr)
+            if op in ("=", "+=", "-=", "*=", "/=", "%=", "&=", "|=",
+                      "^=", "<<=", ">>="):
+                left = expr.left
+                # operands first, then the store
+                if isinstance(left, ast.Index):
+                    self._invalidate_caches_for_expr(left.array, conditional)
+                    self._invalidate_caches_for_expr(left.index, conditional)
+                self._invalidate_caches_for_expr(expr.right, conditional)
+                if isinstance(left, ast.Identifier):
+                    name = _idname(left)
                     self._invalidate_cse_for_var(name)
                     self._invalidate_copies_for_var(name)
                     # Track simple copy: x = y (only if types are compatible)
-                    if _op(expr) == "=" and isinstance(expr.right, ast.Identifier):
-                        if self._types_compatible_for_copy(name, _idname(expr.right)):
-                            self._copies[name] = _idname(expr.right)
-                elif isinstance(expr.left, (ast.UnaryOp, ast.Index)):
-                    # Pointer/array write: clear all caches
+                    if (op == "=" and not conditional
+                            and isinstance(expr.right, ast.Identifier)
+                            and _idname(expr.right) != name
+                            and self._types_compatible_for_copy(
+                                name, _idname(expr.right))):
+                        self._copies[name] = _idname(expr.right)
+                elif (isinstance(left, _MEMBER)
+                        and isinstance(left.obj, ast.Identifier)
+                        and isinstance(left, ast.Member)):
+                    # ``s.x = 1`` changes ``s``
+                    self._invalidate_cse_for_var(_idname(left.obj))
+                    self._invalidate_copies_for_var(_idname(left.obj))
+                else:
+                    # Pointer/array/member write: clear all caches
                     self._clear_all_caches()
-                    return
-            self._invalidate_caches_for_expr(expr.left)
-            self._invalidate_caches_for_expr(expr.right)
+                return
+            self._invalidate_caches_for_expr(expr.left, conditional)
+            self._invalidate_caches_for_expr(
+                expr.right, conditional or op in ("&&", "||"))
         elif isinstance(expr, (ast.UnaryOp, ast.PostfixOp)):
             if _op(expr) in ("++", "--"):
                 if isinstance(expr.operand, ast.Identifier):
@@ -1650,14 +1796,30 @@ class ASTOptimizer:
                     # Pointer increment etc.
                     self._clear_all_caches()
                     return
-            self._invalidate_caches_for_expr(expr.operand)
+            if _op(expr) != "&":
+                self._invalidate_caches_for_expr(expr.operand, conditional)
         elif isinstance(expr, _CALL):
             # Function call: clear entire cache (can modify globals, address-taken vars)
             self._clear_all_caches()
+        elif isinstance(expr, ast.StmtExpr):
+            self._clear_all_caches()
         elif isinstance(expr, ast.TernaryOp):
-            self._invalidate_caches_for_expr(expr.condition)
-            self._invalidate_caches_for_expr(expr.true_expr)
-            self._invalidate_caches_for_expr(expr.false_expr)
+            self._invalidate_caches_for_expr(expr.condition, conditional)
+            self._invalidate_caches_for_expr(expr.true_expr, True)
+            self._invalidate_caches_for_expr(expr.false_expr, True)
+        elif isinstance(expr, (ast.SizeofExpr, ast.SizeofType)):
+            pass  # not evaluated
+        elif isinstance(expr, ast.Identifier):
+            pass
+        elif dataclasses.is_dataclass(expr) and not isinstance(expr, type):
+            # Cast, Index, Member, SequenceExpr, InitializerList,
+            # CompoundLiteral, designators: look at every child.
+            for f in dataclasses.fields(expr):
+                if f.name in ("pos", "location"):
+                    continue
+                v = getattr(expr, f.name, None)
+                if isinstance(v, (list, tuple)) or dataclasses.is_dataclass(v):
+                    self._invalidate_caches_for_expr(v, conditional)
 
     # === Level 3: Copy propagation ===
 
