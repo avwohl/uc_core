@@ -710,6 +710,74 @@ def _rewrite_computed_goto(source: str) -> str:
     return "".join(out)
 
 
+_TYPEOF_RE = re.compile(r"\b(?:__typeof__|__typeof|typeof|typeof_unqual)\b")
+
+
+def _typeof_typename_fix(src: str, tok) -> str | None:
+    """Rewrite ``typeof(type-name)`` into ``typeof(*(type-name *)0)``.
+
+    ``tok`` is the token a parse failed at.  It must be the first token
+    after ``typeof (``; any other failure returns None.  An abstract
+    declarator with an array or function part gets its ``(*)`` in front
+    of that part: ``typeof(int [3])`` becomes ``typeof(*(int (*)[3])0)``.
+    A function type name is not handled (None).
+    """
+    off = getattr(tok, "offset", None)
+    if off is None or not (0 <= off <= len(src)):
+        return None
+    toks = _kr_tokens(src)
+    idx = next((i for i, t in enumerate(toks) if t[1] == off), None)
+    if idx is None or idx < 2 or toks[idx - 1][0] != "(" \
+            or not _TYPEOF_RE.fullmatch(toks[idx - 2][0]):
+        return None
+    depth = 0
+    end = None
+    for j in range(idx, len(toks)):
+        t = toks[j][0]
+        if t in "([{":
+            depth += 1
+        elif t in ")]}":
+            if depth == 0:
+                end = j
+                break
+            depth -= 1
+    if end is None or end == idx:
+        return None
+    body = toks[idx:end]
+    # The specifiers end at the first * [ ( outside braces.
+    depth = 0
+    cut = len(body)
+    for k, (t, _, _) in enumerate(body):
+        if t in "([{":
+            if depth == 0 and t != "{":
+                cut = k
+                break
+            depth += 1
+        elif t in ")]}":
+            depth -= 1
+        elif t == "*" and depth == 0:
+            cut = k
+            break
+    def text(a, b):
+        return src[body[a][1]:body[b - 1][2]] if b > a else ""
+    specs = text(0, cut)
+    decl = body[cut:]
+    if not decl:
+        inner = f"*({specs} *)0"
+    else:
+        split = next((k for k, (t, _, _) in enumerate(decl)
+                      if t in ("[", "(")), None)
+        if split is None:
+            inner = f"*({specs} {text(cut, len(body))} *)0"
+        elif decl[split][0] == "(" and split == 0 and decl[0][0] == "(":
+            return None
+        else:
+            before = src[decl[0][1]:decl[split - 1][2]] if split else ""
+            after = src[decl[split][1]:decl[-1][2]]
+            inner = f"*({specs} {before}(*){after})0"
+    return src[:body[0][1]] + inner + src[body[-1][2]:]
+
+
 # ---- typedef tracker -------------------------------------------------------
 
 
@@ -1015,9 +1083,32 @@ def parse(
     pre = _strip_attributes(source, vector_names)
     hooks, filter_ = _make_typedef_filter(seed_typedefs)
     try:
-        unit = c23_parser.parse(
-            pre, filename=filename, hooks=hooks, token_filter=filter_
-        )
+        try:
+            unit = c23_parser.parse(
+                pre, filename=filename, hooks=hooks, token_filter=filter_
+            )
+        except c23_parser.ParseError as err:
+            # The grammar takes ``typeof(expr)`` only.  ``typeof(type-name)``
+            # (C23 6.7.3.6) fails at the first token of the type name: the
+            # site is rewritten to the equivalent ``typeof(*(type-name *)0)``
+            # and the parse is tried again.
+            if not _TYPEOF_RE.search(pre):
+                raise
+            for _ in range(1000):
+                fixed = _typeof_typename_fix(pre, err.token)
+                if fixed is None:
+                    raise
+                pre = fixed
+                hooks, filter_ = _make_typedef_filter(seed_typedefs)
+                try:
+                    unit = c23_parser.parse(
+                        pre, filename=filename, hooks=hooks,
+                        token_filter=filter_)
+                    break
+                except c23_parser.ParseError as err2:
+                    err = err2
+            else:
+                raise
     except c23_parser.ParseError:
         # Strict C23 parse failed. Only if the host opted into K&R
         # recovery do we rewrite the pre-ANSI shapes (implicit-int

@@ -27,6 +27,35 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Fixed
 
+- **Float detection is scoped to the function.** A float `x` in one
+  function no longer stops `x * 8` becoming a shift on an integer `x` in
+  another function (uc386 lost `shl` and `lea` that way).  A name declared
+  in a function now takes its type from that function; other names take
+  the file-scope declaration.
+- **`(x << a) << b` and `(x >> a) >> b` are not merged when `a + b` is 16
+  or more.**  The merge ignored the operand width, so
+  `(y << 33) << 33` on a `long long` gave 4 and not 0.
+
+- **The AST optimizer no longer applies integer-only rewrites to a float.**
+  `x * 8` became `x << 3`, `x / 8u` became `x >> 3`, `(x * 3) * 5` folded
+  to an integer constant that wraps in 16 bits, `x - x` and `x == x` folded
+  to the int 0 and 1, `x * 0` and `0 / x` to the int 0, and `x + 0` to `x`.
+  For a float or double `x` these gave wrong values (`float nv = 1.5f;
+  nv * 4` was 1.5; uc386 converted the float to an integer, shifted and
+  converted back). The optimizer knows no types, so the new
+  `uc_core.floatness.FloatInfo` collects the names declared with a floating
+  type (objects, functions, parameters, struct members; directly, through a
+  typedef, as pointer or array, or with `typeof`). The rewrites above skip an
+  operand that may be floating. A cast to a float type was never recognized
+  (the cast target is a legacy `BasicType`, not `ast.BasicType`), so
+  `(float)i * 8` was shifted too. Integer output of uc386 is unchanged.
+- **`typeof(type-name)` parses.** The grammar takes only `typeof(expr)`, so
+  `typeof(volatile unsigned char)`, `typeof(unsigned char *)` and
+  `typeof(MyTypedef)` were parse errors. `frontend.parse` now rewrites the
+  failing site to `typeof(*(type-name *)0)` and parses again (an array or
+  function part gets its `(*)`: `typeof(int [3])` is `typeof(*(int (*)[3])0)`).
+  Only a source that fails to parse and uses `typeof` pays for this.
+
 - **The AST optimizer no longer removes, merges or repeats an access to a
   volatile object (C23 6.7.3).** It deleted adjacent stores to a volatile
   global, static, extern, local or typedef object (`g = 1; g = 2;`), a
