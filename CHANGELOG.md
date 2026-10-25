@@ -10,6 +10,12 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Added
 
+- **`strict_allow` for strict mode.** `parse(..., strict_allow={"interrupt"})`
+  lets one kind (`interrupt` or `fastcall`) pass, so a host can support one
+  spelling and keep the others refused. A bare `interrupt` or `fastcall`
+  before `*` is a marker only at the start of a declaration, so
+  `interrupt * x` in an expression is a multiply. The strict scan covers
+  header text, so shipped headers must not use refused markers.
 - **Opt-in strict mode in `frontend.parse`.** `parse(..., strict_unsupported=True)`
   raises `UnsupportedConstructError` (`file:line: message`) for `__interrupt`,
   `_interrupt`, bare `interrupt`, `[[...interrupt...]]`,

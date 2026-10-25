@@ -62,3 +62,26 @@ OK = [
 @pytest.mark.parametrize("src", OK)
 def test_unrelated_names_pass(src):
     assert parse(src, "t.c", strict_unsupported=True) is not None
+
+
+def test_multiply_by_variable_named_interrupt():
+    src = "int interrupt; int f(int x){ return interrupt * x; }"
+    parse(src, strict_unsupported=True)
+    src = "int fastcall; int f(int x){ return x + fastcall * 2; }"
+    parse(src, strict_unsupported=True)
+
+
+def test_bare_before_star_at_declaration_still_refused():
+    with pytest.raises(UnsupportedConstructError):
+        parse("interrupt int *f(void){ return 0; }", strict_unsupported=True)
+    with pytest.raises(UnsupportedConstructError):
+        parse("int a; fastcall char *g(void){ return 0; }",
+              strict_unsupported=True)
+
+
+def test_strict_allow_lets_one_kind_through():
+    parse("__interrupt void isr(void){}", strict_unsupported=True,
+          strict_allow={"interrupt"})
+    with pytest.raises(UnsupportedConstructError):
+        parse("__fastcall int f(int a){return a;}", strict_unsupported=True,
+              strict_allow={"interrupt"})

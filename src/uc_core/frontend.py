@@ -195,11 +195,20 @@ class UnsupportedConstructError(Exception):
         super().__init__(f"{filename}:{line}: {message}")
 
 
-def _check_strict_unsupported(source: str, filename: str, template: str) -> None:
+def _check_strict_unsupported(source: str, filename: str, template: str,
+                              allow: frozenset = frozenset()) -> None:
     """Raise UnsupportedConstructError for the first interrupt / fastcall
     marker that tolerant mode would erase.  Identifiers that merely
     contain the words (interrupt_count) and struct/union/enum tags are
-    not markers.  String and character literals are skipped."""
+    not markers.  String and character literals are skipped.
+
+    ``allow`` holds kinds ("interrupt", "fastcall") a host handles
+    itself; those markers are skipped here and erased later as in
+    tolerant mode.  A bare ``interrupt``/``fastcall`` before ``*`` counts
+    as a marker only at the start of a declaration (start of text or
+    after ``;``, ``{``, ``}``); elsewhere ``*`` is the multiply operator.
+    Known limit: the statement ``interrupt * x;`` is still taken as a
+    declaration."""
     for m in _STRICT_TOKEN_RE.finditer(source):
         kind = m.lastgroup
         name = None
@@ -209,7 +218,16 @@ def _check_strict_unsupported(source: str, filename: str, template: str) -> None
                         else "[[interrupt]]")
         elif kind in ("prefixed", "bare"):
             name = m.group(0)
+            if kind == "bare":
+                rest = source[m.end():].lstrip()
+                if rest.startswith("*"):
+                    prev = source[:m.start()].rstrip()[-1:]
+                    if prev not in ("", ";", "{", "}"):
+                        continue
         if name is None:
+            continue
+        akind = "interrupt" if "interrupt" in name else "fastcall"
+        if akind in allow:
             continue
         line = source.count("\n", 0, m.start()) + 1
         raise UnsupportedConstructError(
@@ -935,6 +953,7 @@ def parse(
     kr_prepass: bool = False,
     strict_unsupported: bool = False,
     unsupported_message: str = _DEFAULT_UNSUPPORTED_MESSAGE,
+    strict_allow: frozenset | set = frozenset(),
 ) -> ast.TranslationUnit:
     """Parse already-preprocessed C source into a typed AST.
 
@@ -953,6 +972,13 @@ def parse(
     :class:`UnsupportedConstructError` with ``file:line``.
     ``unsupported_message`` is a ``str.format`` template with ``{name}``;
     a host sets it to its own wording.  Default is off: tolerant.
+    ``strict_allow`` is a set of kinds, ``"interrupt"`` and/or
+    ``"fastcall"``, that strict mode lets through (they are then erased
+    as in tolerant mode).  A host that supports one spelling in a later
+    phase records it in its own pre-pass and passes the kind here, so
+    the other kinds stay refused.  The scan covers the whole
+    preprocessed text, header text included, so shipped headers must
+    not use refused markers.
 
     ``seed_typedefs`` pre-populates the typedef tracker with names a
     host knows about from system headers it processed out-of-band
@@ -977,7 +1003,8 @@ def parse(
     # parser builds the AST with no `is_packed` flag on either shape,
     # so we re-attach it below.
     if strict_unsupported:
-        _check_strict_unsupported(source, filename, unsupported_message)
+        _check_strict_unsupported(source, filename, unsupported_message,
+                                  frozenset(strict_allow))
     packed_tag_names: set[str] = set()
     packed_typedef_names: set[str] = set()
     for m in _PACKED_NAMED_STRUCT_RE.finditer(source):
