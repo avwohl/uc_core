@@ -342,6 +342,27 @@ def test_algebraic_add_zero():
     assert type(val).__name__ == "Identifier" and val.name.text == "x"
 
 
+@pytest.mark.parametrize("src", [
+    # the inner operation wraps at the width of its own type
+    "unsigned long long f(unsigned u){ return (u + 65535u) - 256ULL; }",
+    "unsigned long f(unsigned u){ return (u + 1u) + 100000UL; }",
+    "unsigned long long f(unsigned u){ return (u * 2u) * 3ULL; }",
+])
+def test_nested_fold_not_across_constant_widths(src):
+    """(x op c1) op c2 stays when c1 and c2 differ in width."""
+    unit = _optimize(src)
+    body = _find(unit, "ReturnStmtValue")[0].value
+    assert isinstance(body, ast.BinaryOp)
+    assert isinstance(body.left, ast.BinaryOp)
+
+
+def test_nested_fold_same_width():
+    unit = _optimize("unsigned f(unsigned u){ return (u + 1u) + 5u; }")
+    body = _find(unit, "ReturnStmtValue")[0].value
+    assert isinstance(body, ast.BinaryOp)
+    assert isinstance(body.left, ast.Identifier)
+
+
 def test_algebraic_mul_zero():
     unit = _optimize("int f(int x){ return x * 0; }")
     val = _find(unit, "ReturnStmtValue")[0].value

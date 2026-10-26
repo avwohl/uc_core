@@ -27,6 +27,12 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Fixed
 
+- **Nested constant folding does not cross constant widths.**
+  `(u + 65535u) - 256ULL` became `u + 65279`, which skips the wrap of the
+  `unsigned int` addition (`u = 4` gave 65283 instead of
+  `0xffffffffffffff03`). `(x op c1) op c2` for `+`, `-` and `*` is folded
+  only when c1 and c2 have the same width.
+
 - **Copy propagation at level 3 follows the side effects of declaration
   initialisers and of the parts of an expression.** `int a = v; int b = a++;
   return a;` returned `v`. Each declarator now takes effect in order, so

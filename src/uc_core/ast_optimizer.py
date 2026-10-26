@@ -1090,6 +1090,14 @@ class ASTOptimizer:
             )
             is_unsigned = int_flags(right)[2] or int_flags(left.right)[2]
             mask = max(self._literal_mask(right), self._literal_mask(left.right))
+            if (op in ("+", "-", "*") and inner_op in ("+", "-", "*")
+                    and self._literal_mask(right)
+                    != self._literal_mask(left.right)):
+                # The inner operation wraps at the width of its own type;
+                # `(u + 65535u) - 256ULL` is `3 - 256` in 64 bits, not
+                # `u + 65279` (the constants have different widths, so the
+                # outer type is wider than the inner one).
+                return None
 
             def _new(val: int) -> ast.IntLiteral:
                 # Preserve unsignedness: a fold of `4 - 8U` is 4294967292
