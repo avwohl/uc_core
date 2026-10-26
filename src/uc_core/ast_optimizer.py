@@ -140,6 +140,14 @@ def _unop(op: str, operand) -> "ast.UnaryOp":
     return ast.UnaryOp(op=_optok(op), operand=operand)
 
 
+def _is_float_type_node(t) -> bool:
+    """A cast target that names float, double or long double.  ast.BasicType
+    is a tombstone, so the type node (uc_core.ast_legacy.BasicType) is
+    recognised by its class name."""
+    return (type(t).__name__ == "BasicType"
+            and getattr(t, "name", None) in ("float", "double", "long double"))
+
+
 def _expr_has_float(node) -> bool:
     """Lexical detection: does `node`'s subtree contain a FloatLiteral
     or a Cast to a floating type? Used by strength-reduction passes
@@ -155,7 +163,7 @@ def _expr_has_float(node) -> bool:
         return True
     if isinstance(node, ast.Cast):
         t = node.target_type
-        if isinstance(t, ast.BasicType) and t.name in ("float", "double", "long double"):
+        if _is_float_type_node(t):
             return True
     if isinstance(node, list):
         return any(_expr_has_float(c) for c in node)
@@ -811,7 +819,7 @@ class ASTOptimizer:
         if isinstance(other, (ast.FloatLiteral, ast.Cast)):
             if isinstance(other, ast.Cast):
                 t = other.target_type
-                if isinstance(t, ast.BasicType) and t.name in ("float", "double", "long double"):
+                if _is_float_type_node(t):
                     return None
             else:
                 return None
@@ -1283,14 +1291,12 @@ class ASTOptimizer:
             ek = ASTOptimizer._expr_key(expr.expr)
             if ek is None:
                 return None
-            # Include target type to distinguish e.g. (signed char)x vs (unsigned char)x
-            tt = expr.target_type
-            if isinstance(tt, ast.BasicType):
-                tk = f"{tt.name}:{tt.is_signed}"
-            elif isinstance(tt, ast.PointerType):
-                tk = "ptr"
-            else:
-                tk = type(tt).__name__
+            # The whole target type is part of the key: (signed char)x,
+            # (unsigned char)x, (short)x and (U16)x are different values.
+            # The type nodes are dataclasses whose repr names every
+            # field; a node without such a repr (an object address in
+            # the text) never matches another and so is never merged.
+            tk = repr(expr.target_type)
             return f"CAST:{tk}:{ek}"
         # Calls, Index, Member, etc. are not pure for CSE purposes
         return None

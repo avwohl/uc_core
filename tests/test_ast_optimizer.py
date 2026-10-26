@@ -363,6 +363,30 @@ def test_nested_fold_same_width():
     assert isinstance(body.left, ast.Identifier)
 
 
+def test_cse_keeps_cast_targets_apart():
+    """Regression: the CSE key of a Cast named the target type only for
+    nodes of a class that no longer exists, so (char)p, (short)p and
+    (signed char)p had one key and ``a & b`` over different casts of p
+    was replaced by an earlier ``a' & b'``."""
+    unit = _optimize(
+        "int f(unsigned char p){ return "
+        "((unsigned long)(char)p & (unsigned long)(char)p) == "
+        "((unsigned long)(short)p & (unsigned long)(unsigned short)p); }")
+    cmp_ = _find(unit, "ReturnStmtValue")[0].value
+    assert isinstance(cmp_, ast.BinaryOp)
+    assert cmp_.left is not cmp_.right
+    assert repr(cmp_.left) != repr(cmp_.right)
+
+
+def test_no_shift_for_cast_to_float():
+    """(double)n * 16 is a float multiply, not a shift: the float test
+    looked for a class that no longer exists."""
+    unit = _optimize("double f(int n){ return (double)n * 16; }")
+    val = _find(unit, "ReturnStmtValue")[0].value
+    assert isinstance(val, ast.Cast) or (
+        isinstance(val, ast.BinaryOp) and str(val.op.text) == "*")
+
+
 def test_algebraic_mul_zero():
     unit = _optimize("int f(int x){ return x * 0; }")
     val = _find(unit, "ReturnStmtValue")[0].value
