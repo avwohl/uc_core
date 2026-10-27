@@ -720,7 +720,9 @@ def _typeof_typename_fix(src: str, tok) -> str | None:
     after ``typeof (``; any other failure returns None.  An abstract
     declarator with an array or function part gets its ``(*)`` in front
     of that part: ``typeof(int [3])`` becomes ``typeof(*(int (*)[3])0)``.
-    A function type name is not handled (None).
+    A function type name ``typeof(int (void))`` gets the same shape:
+    ``typeof(*(int (*)(void))0)``.  A parenthesised abstract declarator
+    such as ``int (*)[3]`` is not handled (None).
     """
     off = getattr(tok, "offset", None)
     if off is None or not (0 <= off <= len(src)):
@@ -769,8 +771,9 @@ def _typeof_typename_fix(src: str, tok) -> str | None:
                       if t in ("[", "(")), None)
         if split is None:
             inner = f"*({specs} {text(cut, len(body))} *)0"
-        elif decl[split][0] == "(" and split == 0 and decl[0][0] == "(":
-            return None
+        elif (decl[split][0] == "(" and split == 0 and len(decl) > 1
+              and decl[1][0] in ("*", "(", "[", "^")):
+            return None     # a parenthesised declarator: int (*)[3]
         else:
             before = src[decl[0][1]:decl[split - 1][2]] if split else ""
             after = src[decl[split][1]:decl[-1][2]]

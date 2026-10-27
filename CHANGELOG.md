@@ -27,6 +27,7 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Fixed
 
+- `typeof(int (void))` (a function type name) parses: the retry rewrite makes `typeof(*(int (*)(void))0)`. A parenthesised abstract declarator such as `typeof(int (*)[3])` is still not handled. `tests/test_typeof_function_type.py`.
 - **Nested constant folding does not cross constant widths.**
   `(u + 65535u) - 256ULL` became `u + 65279`, which skips the wrap of the
   `unsigned int` addition (`u = 4` gave 65283 instead of
