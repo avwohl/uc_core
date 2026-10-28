@@ -69,6 +69,12 @@ class Preprocessor:
         # source order.  The preprocessor only records them; the compiler
         # driver decides what a verb means (keep, public, vector).
         self.target_pragmas: list[tuple[str, list[str], str, int]] = []
+        # (file, line) of each line of the text that preprocess() returned,
+        # so a host can name the real source line of a diagnostic.  The
+        # output has no line markers: directives and continued lines
+        # vanish, and an include is spliced in.
+        self.line_map: list[tuple[str, int]] = []
+        self._included_map: Optional[list] = None
 
         # Initialize predefined macros
         self._init_predefined_macros()
@@ -244,6 +250,7 @@ class Preprocessor:
 
         lines = source.split('\n')
         output_lines = []
+        out_map = []   # (file, line) of each output line; see line_map
 
         # Track line offset for #line directive support
         # virtual_line = actual_line + line_offset
@@ -269,9 +276,11 @@ class Preprocessor:
             # Check if this is a preprocessor directive
             stripped = line.lstrip()
             if stripped.startswith('#'):
+                self._included_map = None
                 result = self._process_directive(stripped[1:].strip())
                 if result is not None:
                     output_lines.append(result)
+                    self._note_lines(out_map, result, filename, actual_line)
                 # Check if #line changed current_line
                 if self.current_line != old_line:
                     # Update line_offset so future lines use the new numbering
@@ -286,6 +295,8 @@ class Preprocessor:
                     line = line + '\n' + lines[i]
                 expanded = self._expand_macros(line)
                 output_lines.append(expanded)
+                self._included_map = None
+                self._note_lines(out_map, expanded, filename, actual_line)
             # else: skip line (inactive conditional block)
 
             i += 1
@@ -295,7 +306,21 @@ class Preprocessor:
             raise PreprocessorError("Unterminated #if/#ifdef/#ifndef",
                                    self.current_file, self.current_line)
 
+        self.line_map = out_map
         return '\n'.join(output_lines)
+
+    def _note_lines(self, out_map: list, text: str, filename: str,
+                    line: int) -> None:
+        """Record the origin of each output line of one output item.
+        An included file gives its own map (``_included_map``); any other
+        item starts at ``line`` of ``filename`` and goes on from there."""
+        inc = self._included_map
+        self._included_map = None
+        if inc is not None and len(inc) == text.count('\n') + 1:
+            out_map.extend(inc)
+        else:
+            out_map.extend((filename, line + k)
+                           for k in range(text.count('\n') + 1))
 
     def _has_unclosed_macro_call(self, text: str,
                                  next_line: "str | None" = None) -> bool:
@@ -398,10 +423,12 @@ class Preprocessor:
 
         lines = source.split('\n')
         output_lines = []
+        out_map = []
 
         i = 0
         while i < len(lines):
             self.current_line = i + 1
+            actual_line = i + 1
             self.macros["__LINE__"] = Macro("__LINE__", body=str(self.current_line), is_predefined=True)
 
             line = lines[i]
@@ -414,9 +441,11 @@ class Preprocessor:
             # Check if this is a preprocessor directive
             stripped = line.lstrip()
             if stripped.startswith('#'):
+                self._included_map = None
                 result = self._process_directive(stripped[1:].strip())
                 if result is not None:
                     output_lines.append(result)
+                    self._note_lines(out_map, result, filename, actual_line)
             elif self._is_active():
                 # Function-like macro invocations whose `( ... )` spans
                 # several lines (chocolate-doom's `PACKED_STRUCT(...)`,
@@ -430,6 +459,8 @@ class Preprocessor:
                     line = line + '\n' + lines[i]
                 expanded = self._expand_macros(line)
                 output_lines.append(expanded)
+                self._included_map = None
+                self._note_lines(out_map, expanded, filename, actual_line)
 
             i += 1
 
@@ -438,6 +469,7 @@ class Preprocessor:
             raise PreprocessorError("Unterminated #if/#ifdef/#ifndef",
                                    self.current_file, self.current_line)
 
+        self._included_map = out_map
         return '\n'.join(output_lines)
 
     def preprocess_file(self, filepath: str) -> str:

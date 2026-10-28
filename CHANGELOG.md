@@ -10,6 +10,8 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Added
 
+- `Preprocessor.line_map`: the (file, line) of each line of the text that `preprocess()` returns. The output has no line markers, so a host needs the map to name the real source line of a diagnostic. The output text does not change.
+
 - **`strict_allow` for strict mode.** `parse(..., strict_allow={"interrupt"})`
   lets one kind (`interrupt` or `fastcall`) pass, so a host can support one
   spelling and keep the others refused. A bare `interrupt` or `fastcall`
