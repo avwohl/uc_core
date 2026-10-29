@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 
 from . import ast
+from . import _dcfast
 
 _FIELD_CACHE: dict[type, tuple[str, ...]] = {}
 
@@ -35,7 +36,7 @@ _FN_DECLARATORS = ("FnDeclarator", "FnDeclaratorEmpty", "AbstractFn",
 
 
 def _is_node(x) -> bool:
-    return dataclasses.is_dataclass(x) and not isinstance(x, type)
+    return _dcfast.is_dataclass(x) and not isinstance(x, type)
 
 
 def children(node, skip_params: bool = True):
@@ -43,7 +44,7 @@ def children(node, skip_params: bool = True):
     cls = type(node)
     names = _FIELD_CACHE.get(cls)
     if names is None:
-        names = tuple(f.name for f in dataclasses.fields(node)
+        names = tuple(f.name for f in _dcfast.fields(node)
                       if f.name not in ("pos", "location"))
         _FIELD_CACHE[cls] = names
     skip = skip_params and cls.__name__ in _FN_DECLARATORS

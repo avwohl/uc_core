@@ -23,6 +23,7 @@ Level 3 (-O3) adds:
 import copy
 import dataclasses
 from . import ast
+from . import _dcfast
 from ._const import int_value, int_flags, make_int_lit, char_value
 from .c23_parser import Token
 from .codegen_helpers import make_identifier
@@ -167,8 +168,8 @@ def _expr_has_float(node) -> bool:
             return True
     if isinstance(node, list):
         return any(_expr_has_float(c) for c in node)
-    if dataclasses.is_dataclass(node):
-        for f in dataclasses.fields(node):
+    if _dcfast.is_dataclass(node):
+        for f in _dcfast.fields(node):
             if _expr_has_float(getattr(node, f.name, None)):
                 return True
     return False
@@ -1825,14 +1826,14 @@ class ASTOptimizer:
             pass  # not evaluated
         elif isinstance(expr, ast.Identifier):
             pass
-        elif dataclasses.is_dataclass(expr) and not isinstance(expr, type):
+        elif _dcfast.is_dataclass(expr) and not isinstance(expr, type):
             # Cast, Index, Member, SequenceExpr, InitializerList,
             # CompoundLiteral, designators: look at every child.
-            for f in dataclasses.fields(expr):
+            for f in _dcfast.fields(expr):
                 if f.name in ("pos", "location"):
                     continue
                 v = getattr(expr, f.name, None)
-                if isinstance(v, (list, tuple)) or dataclasses.is_dataclass(v):
+                if isinstance(v, (list, tuple)) or _dcfast.is_dataclass(v):
                     self._invalidate_caches_for_expr(v, conditional)
 
     # === Level 3: Copy propagation ===
