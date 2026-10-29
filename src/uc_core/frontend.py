@@ -791,7 +791,8 @@ def _typeof_typename_fix(src: str, tok) -> str | None:
 # can use, and renames the uses that the declaration governs.  A use with
 # no declaration in an enclosing block keeps its name.
 
-_TAG_DECL_RE = re.compile(r"\b(?:struct|union|enum)\s+[A-Za-z_]\w*\s*[{:;]")
+_TAG_DECL_RE = re.compile(
+    r"\b(?:struct|union|enum)\s+[A-Za-z_]\w*\s*[{:;]|\benum\s*\{")
 
 
 def _rename_block_scope_tags(source: str, filename: str) -> str:
@@ -826,6 +827,26 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
         elif k is K.RBRACE:
             if stack:
                 stack.pop()
+        elif k is K.KW_ENUM and i + 1 < n and toks[i + 1].kind is K.LBRACE:
+            # An anonymous enumeration with explicit values may need a type
+            # wider than int; a back end finds that type by the tag, so the
+            # enumeration gets one.
+            j = i + 2
+            depth = 1
+            has_value = False
+            while j < n and depth:
+                kj = toks[j].kind
+                if kj is K.LBRACE:
+                    depth += 1
+                elif kj is K.RBRACE:
+                    depth -= 1
+                elif kj is K.ASSIGN and depth == 1:
+                    has_value = True
+                j += 1
+            if has_value:
+                counter += 1
+                edits.append((t.offset + len("enum"), "",
+                              f" __anon_enum_{salt}_{counter}"))
         elif k in kw_tag and i + 1 < n and toks[i + 1].kind is K.IDENT:
             tag_tok = toks[i + 1]
             tag = tag_tok.text

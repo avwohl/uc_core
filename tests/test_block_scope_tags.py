@@ -35,3 +35,10 @@ def test_a_block_scope_is_popped_at_its_closing_brace():
              "struct T { char c; } u; }")
     names = [w for w in out.replace("{", " ").split() if w.startswith("T__b")]
     assert len(set(names)) == 2
+
+
+def test_an_anonymous_enum_with_values_gets_a_tag_and_one_without_does_not():
+    out = _r("enum { A = 70000, B } x;\nenum { C, D } y;\n")
+    first, second = out.split("\n")[:2]
+    assert first.startswith("enum __anon_enum_") and "{ A = 70000, B } x;" in first
+    assert second == "enum { C, D } y;"
