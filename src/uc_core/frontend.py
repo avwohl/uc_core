@@ -418,7 +418,7 @@ def _rewrite_kr_and_implicit_int(source: str) -> str:
     cleanly match is left untouched (max-recovery, no regressions on the
     shapes we already parse)."""
     toks = _kr_tokens(source)
-    edits: list[tuple[int, int, str]] = []
+    edits: list[tuple[int, str, str]] = []
     depth = 0
     i = 0
     # External-declaration boundary: start of file, or just after a
@@ -668,7 +668,7 @@ def _rewrite_computed_goto(source: str) -> str:
                 continue
         k += 1
 
-    edits: list[tuple[int, int, str]] = []
+    edits: list[tuple[int, str, str]] = []
     for sc in scopes:
         if not sc.names:
             continue
@@ -779,6 +779,105 @@ def _typeof_typename_fix(src: str, tok) -> str | None:
             after = src[decl[split][1]:decl[-1][2]]
             inner = f"*({specs} {before}(*){after})0"
     return src[:body[0][1]] + inner + src[body[-1][2]:]
+
+
+# ---- block-scope tags -------------------------------------------------------
+#
+# The tag of a struct, union or enum declared inside a block belongs to
+# that block (C23 6.2.1, 6.7.2.3).  The back ends key their type tables by
+# the bare tag, so ``struct S`` in a function and ``struct S`` at file
+# scope were one type.  The pass below renames each tag that a block
+# declares (with a body, or as ``struct S;``) to a name that no other scope
+# can use, and renames the uses that the declaration governs.  A use with
+# no declaration in an enclosing block keeps its name.
+
+_TAG_DECL_RE = re.compile(r"\b(?:struct|union|enum)\s+[A-Za-z_]\w*\s*[{:;]")
+
+
+def _rename_block_scope_tags(source: str, filename: str) -> str:
+    if not _TAG_DECL_RE.search(source):
+        return source
+    import zlib
+    salt = "%04x" % (zlib.crc32(filename.encode("utf-8", "replace")) & 0xFFFF)
+    toks = list(c23_parser.scan(source, filename=filename))
+    kw_tag = (K.KW_STRUCT, K.KW_UNION, K.KW_ENUM)
+    edits: list[tuple[int, str, str]] = []
+    # stack entries: dict (a block scope) or None (the braces of a tag body)
+    stack: list = []
+    file_tags: set[str] = set()
+    counter = 0
+    n = len(toks)
+    i = 0
+
+    def block_scopes():
+        return [d for d in stack if d is not None]
+
+    def lookup(tag):
+        for d in reversed(block_scopes()):
+            if tag in d:
+                return d[tag]
+        return None
+
+    while i < n:
+        t = toks[i]
+        k = t.kind
+        if k is K.LBRACE:
+            stack.append({})
+        elif k is K.RBRACE:
+            if stack:
+                stack.pop()
+        elif k in kw_tag and i + 1 < n and toks[i + 1].kind is K.IDENT:
+            tag_tok = toks[i + 1]
+            tag = tag_tok.text
+            j = i + 2
+            nxt = toks[j].kind if j < n else None
+            is_enum = k is K.KW_ENUM
+            if is_enum and nxt is K.COLON:
+                while j < n and toks[j].kind not in (K.LBRACE, K.SEMI,
+                                                     K.RPAREN, K.COMMA):
+                    j += 1
+                nxt = toks[j].kind if j < n else None
+            is_def = nxt is K.LBRACE
+            prev = toks[i - 1].kind if i else None
+            is_fwd = (nxt is K.SEMI and not is_enum
+                      and prev in (None, K.SEMI, K.LBRACE, K.RBRACE))
+            in_block = bool(block_scopes())
+            if not in_block:
+                file_tags.add(tag)
+            else:
+                cur = block_scopes()[-1]
+                known = lookup(tag)
+                if is_def or is_fwd:
+                    if tag in cur:
+                        new = cur[tag]
+                    else:
+                        counter += 1
+                        new = f"{tag}__b{salt}_{counter}"
+                        cur[tag] = new
+                else:
+                    new = known
+                if new is not None and new != tag:
+                    edits.append((tag_tok.offset, tag, new))
+            if is_def:
+                # skip to the brace: it opens a tag body, not a scope
+                stack.append(None)
+                i = j + 1
+                continue
+            i += 2
+            continue
+        i += 1
+    if not edits:
+        return source
+    out = []
+    pos = 0
+    for off, tag, new in edits:
+        if off < pos or source[off:off + len(tag)] != tag:
+            return source          # the offsets do not match: leave as is
+        out.append(source[pos:off])
+        out.append(new)
+        pos = off + len(tag)
+    out.append(source[pos:])
+    return "".join(out)
 
 
 # ---- typedef tracker -------------------------------------------------------
@@ -1084,6 +1183,7 @@ def parse(
         packed_typedef_names.add(m.group(1))
     vector_names: set = set()
     pre = _strip_attributes(source, vector_names)
+    pre = _rename_block_scope_tags(pre, filename)
     hooks, filter_ = _make_typedef_filter(seed_typedefs)
     try:
         try:
