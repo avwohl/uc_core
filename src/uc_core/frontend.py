@@ -790,6 +790,20 @@ def _typeof_typename_fix(src: str, tok) -> str | None:
 # declares (with a body, or as ``struct S;``) to a name that no other scope
 # can use, and renames the uses that the declaration governs.  A use with
 # no declaration in an enclosing block keeps its name.
+#
+# The enumeration constants of a block-scope enumeration belong to the
+# block too (C23 6.2.1p4), so ``enum {X = 77};`` in a block must not change
+# a file-scope ``X``, not even before the block.  Each constant of such an
+# enumeration gets a new name, and every identifier token of that name in
+# the rest of the block follows (also an inner declaration of the same
+# name, which hides the constant anyway).  A name after ``.`` or ``->`` is a
+# member and stays.  In a struct or union body inside the block, only a
+# name after ``[``, ``:``, ``(`` or an arithmetic operator is a use; a name
+# before ``;`` ``,`` or ``[`` there is a member declarator and stays.  A
+# declaration ``int X;`` in a block, after a basic type keyword, of a name
+# that is an enumeration constant (at file scope or in an enclosing block)
+# hides the constant: the variable gets its own name for the rest of the
+# block.
 
 _TAG_DECL_RE = re.compile(
     r"\b(?:struct|union|enum)\s+[A-Za-z_]\w*\s*[{:;]|\benum\s*\{")
@@ -803,7 +817,8 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
     toks = list(c23_parser.scan(source, filename=filename))
     kw_tag = (K.KW_STRUCT, K.KW_UNION, K.KW_ENUM)
     edits: list[tuple[int, str, str]] = []
-    # stack entries: dict (a block scope) or None (the braces of a tag body)
+    # stack entries: dict (a block scope) or a str, "enum", "struct" or
+    # "union" (the braces of a tag body)
     stack: list = []
     file_tags: set[str] = set()
     counter = 0
@@ -811,7 +826,7 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
     i = 0
 
     def block_scopes():
-        return [d for d in stack if d is not None]
+        return [d for d in stack if isinstance(d, dict)]
 
     def lookup(tag):
         for d in reversed(block_scopes()):
@@ -819,6 +834,13 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
                 return d[tag]
         return None
 
+    file_consts: set[str] = set()
+    decl_kw = (K.KW_VOID, K.KW_CHAR, K.KW_SHORT, K.KW_INT, K.KW_LONG,
+               K.KW_FLOAT, K.KW_DOUBLE, K.KW_SIGNED, K.KW_UNSIGNED,
+               K.KW_BOOL)
+    const_ok_prev = (K.LBRACKET, K.COLON, K.LPAREN, K.PLUS, K.MINUS,
+                     K.SLASH, K.LSHIFT, K.RSHIFT, K.AMP, K.PIPE, K.CARET,
+                     K.TILDE, K.PERCENT)
     while i < n:
         t = toks[i]
         k = t.kind
@@ -827,6 +849,45 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
         elif k is K.RBRACE:
             if stack:
                 stack.pop()
+        elif k is K.IDENT:
+            prev = toks[i - 1].kind if i else None
+            top = stack[-1] if stack else None
+            if prev in (K.DOT, K.ARROW):
+                pass
+            elif top == "enum" and prev in (K.LBRACE, K.COMMA):
+                cur = block_scopes()[-1] if block_scopes() else None
+                if cur is None:
+                    file_consts.add(t.text)
+                else:
+                    counter += 1
+                    new = f"{t.text}__c{salt}_{counter}"
+                    cur["#" + t.text] = new
+                    edits.append((t.offset, t.text, new))
+            elif top in ("struct", "union") and prev not in const_ok_prev:
+                pass
+            else:
+                scopes = block_scopes()
+                found = None
+                for d in reversed(scopes):
+                    found = d.get("#" + t.text)
+                    if found is not None:
+                        break
+                cur = scopes[-1] if scopes else None
+                if (prev in decl_kw and cur is not None
+                        and "#" + t.text not in cur
+                        and (found is not None or t.text in file_consts)):
+                    # ``int X;`` in a block hides a constant X: the
+                    # variable gets a name of its own, like a constant.
+                    counter += 1
+                    found = f"{t.text}__c{salt}_{counter}"
+                    cur["#" + t.text] = found
+                if found is not None:
+                    edits.append((t.offset, t.text, found))
+        elif (k in kw_tag and i + 1 < n and toks[i + 1].kind is K.LBRACE
+              and k is not K.KW_ENUM):
+            stack.append("struct" if k is K.KW_STRUCT else "union")
+            i += 2
+            continue
         elif k is K.KW_ENUM and i + 1 < n and toks[i + 1].kind is K.LBRACE:
             # An anonymous enumeration with explicit values may need a type
             # wider than int; a back end finds that type by the tag, so the
@@ -847,6 +908,9 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
                 counter += 1
                 edits.append((t.offset + len("enum"), "",
                               f" __anon_enum_{salt}_{counter}"))
+            stack.append("enum")
+            i += 2
+            continue
         elif k in kw_tag and i + 1 < n and toks[i + 1].kind is K.IDENT:
             tag_tok = toks[i + 1]
             tag = tag_tok.text
@@ -881,7 +945,8 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
                     edits.append((tag_tok.offset, tag, new))
             if is_def:
                 # skip to the brace: it opens a tag body, not a scope
-                stack.append(None)
+                stack.append("enum" if is_enum else
+                             "struct" if k is K.KW_STRUCT else "union")
                 i = j + 1
                 continue
             i += 2

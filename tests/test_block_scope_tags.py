@@ -42,3 +42,30 @@ def test_an_anonymous_enum_with_values_gets_a_tag_and_one_without_does_not():
     first, second = out.split("\n")[:2]
     assert first.startswith("enum __anon_enum_") and "{ A = 70000, B } x;" in first
     assert second == "enum { C, D } y;"
+
+
+def test_enum_constants_of_a_block_enum_get_their_own_names():
+    out = _r("enum E { X1 = 5 };\n"
+             "void f(void) { int a = X1; { enum F { X1 = 77, Y = X1 + 1 }; "
+             "a = X1 + Y; } a = X1; }\n")
+    first, second = out.split("\n")[:2]
+    assert first == "enum E { X1 = 5 };"
+    assert second.startswith("void f(void) { int a = X1; ")
+    assert second.endswith(" a = X1; }")
+    new = second.split("{ ")[3].split(" =")[0]
+    assert new.startswith("X1__c") and second.count(new) == 3
+    assert second.count("Y__c") == 2
+
+
+def test_a_member_after_dot_or_arrow_is_not_renamed():
+    out = _r("void f(void) { struct S { int X; } s; { enum { X = 3 }; "
+             "s.X = X; } }")
+    assert "s.X = X__c" in out and "{ int X; } s;" in out
+
+
+def test_a_variable_that_hides_an_enum_constant_gets_its_own_name():
+    out = _r("enum { A = 5 };\nint f(void) { { int A = 3; return A; } }\n"
+             "int g(void) { return A; }\n")
+    lines = out.split("\n")
+    assert "{ int A__c" in lines[1] and lines[1].count("A__c") == 2
+    assert lines[2] == "int g(void) { return A; }"
