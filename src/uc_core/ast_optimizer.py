@@ -267,6 +267,7 @@ class ASTOptimizer:
     # === Statement walkers (with dead code elimination) ===
 
     def _optimize_stmt(self, stmt: ast.Statement) -> None:
+        self._float.clear_memo()
         if (self.opt_level >= 3
                 and isinstance(stmt, (ast.LabelStmt,) + _CASE)):
             # A jump can reach a label or a case from anywhere, so no

@@ -46,15 +46,25 @@ class FloatInfo:
         # Per function: (floating locals, all locals), by id(FunctionDef).
         self._local: dict[int, tuple[set[str], set[str]]] = {}
         self._cur: tuple[set[str], set[str]] | None = None
+        # maybe_float answers by id(node) -> (answer, node); the node is
+        # kept so the id stays valid.  Valid while the tree below a
+        # queried node is not rewritten: ``clear_memo`` at each statement.
+        self._memo: dict[int, tuple[bool, object]] = {}
         if tu is not None:
             self._walk_unit(tu)
 
     def enter(self, fn) -> None:
         """Queries now refer to the body of function definition ``fn``."""
         self._cur = self._local.get(id(fn))
+        self._memo.clear()
 
     def leave(self) -> None:
         self._cur = None
+        self._memo.clear()
+
+    def clear_memo(self) -> None:
+        """Forget the answers of ``maybe_float`` (the tree changed)."""
+        self._memo.clear()
 
     def _name_float(self, name: str) -> bool:
         cur = self._cur
@@ -108,6 +118,17 @@ class FloatInfo:
 
     def maybe_float(self, expr) -> bool:
         """May ``expr`` have a floating type?  True when unsure."""
+        memo = self._memo
+        hit = memo.get(id(expr))
+        if hit is not None:
+            return hit[0]
+        result = self._maybe_float(expr)
+        if _is_node(expr):
+            memo[id(expr)] = (result, expr)
+        return result
+
+    def _maybe_float(self, expr) -> bool:
+        memo = self._memo
         stack = [expr]
         while stack:
             n = stack.pop()
@@ -115,6 +136,11 @@ class FloatInfo:
                 stack.extend(n)
                 continue
             if not _is_node(n):
+                continue
+            hit = memo.get(id(n))
+            if hit is not None:
+                if hit[0]:
+                    return True
                 continue
             cls = type(n).__name__
             if cls == "FloatLiteral":
