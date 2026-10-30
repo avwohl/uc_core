@@ -125,3 +125,49 @@ def test_a_typedef_redeclared_in_a_nested_block_is_renamed():
     out = frontend._rename_block_scope_typedefs(src, "x.c")
     assert "typedef char L__t" in out
     assert "return sizeof(L);" in out
+
+
+# ---- the scope of an enumerator starts after its enumerator-definition ------
+
+
+def test_a_block_enumerator_in_its_own_initializer_names_the_outer_one():
+    out = _r("enum { A = 5 };\nint main(void) { { enum { A = A * 2 }; "
+             "int x = A; } return A; }\n")
+    body = out.split("\n")[1]
+    new = body.split(" { ")[2].split(" =")[0]
+    assert new.startswith("A__c")
+    assert "= A * 2" in body              # the initializer: the outer A
+    assert "int x = " + new + ";" in body  # after the definition: the new A
+    assert body.endswith("return A; }")
+
+
+def test_an_enumerator_is_visible_in_the_next_initializer_only():
+    out = _r("enum { B = 1 };\nvoid f(void) { enum { B = 3, C = B + 1, "
+             "D = g(B, C) }; }\n")
+    body = out.split("\n")[1]
+    new = body.split(" { ")[2].split(" =")[0]
+    assert "C__c" in body and "D__c" in body
+    assert body.count(new) == 3     # B = 3, C = B + 1, g(B, C)
+    assert "= g(" + new + ", C__c" in body
+
+
+def test_a_comma_in_parentheses_does_not_define_an_enumerator():
+    out = _r("void f(void) { enum { E = h(1, K), K = 2 }; }\n")
+    assert "h(1, K)" in out         # K is not yet declared there
+    assert out.count("__c") == 2    # the definitions of E and K
+
+
+def test_a_block_typedef_is_seen_in_an_enumerator_initializer():
+    out = _rename_block_scope_typedefs(
+        "typedef int T;\nstatic int h(void) { typedef char T; "
+        "enum { T3 = sizeof(T) }; return T3; }\n", "t.c")
+    new = out.split("typedef char ")[1].split(";")[0]
+    assert new.startswith("T__t") and out.count(new) == 2
+    assert "sizeof(" + new + ")" in out
+
+
+def test_an_enumerator_named_like_a_typedef_is_not_renamed():
+    src = ("typedef int T;\nint f(void) { typedef char T; "
+           "enum { T2 = 1 }; return T2; }\n")
+    out = _rename_block_scope_typedefs(src, "t.c")
+    assert "T2 = 1" in out and "return T2" in out

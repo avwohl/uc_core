@@ -880,6 +880,16 @@ def _rename_block_scope_typedefs(source: str, filename: str,
     while i < n:
         t = toks[i]
         k = t.kind
+        eb = stack[-1] if stack and isinstance(stack[-1], list) else None
+        if eb is not None:
+            if k in (K.LPAREN, K.LBRACKET):
+                eb[2] += 1
+            elif k in (K.RPAREN, K.RBRACKET):
+                eb[2] -= 1
+            elif k is K.ASSIGN and eb[2] == 0:
+                eb[1] = True
+            elif k is K.COMMA and eb[2] == 0:
+                eb[1] = False
         if k is K.LBRACE:
             stack.append({})
         elif k is K.RBRACE:
@@ -895,7 +905,9 @@ def _rename_block_scope_typedefs(source: str, filename: str,
                                                      K.RPAREN, K.COMMA):
                     j += 1
             if j < n and toks[j].kind is K.LBRACE:
-                stack.append("tag")
+                # an enum body: [marker, in an initializer, paren depth]
+                stack.append(["enum", False, 0] if k is K.KW_ENUM
+                             else "tag")
                 i = j + 1
                 continue
         elif k is K.KW_TYPEDEF:
@@ -922,6 +934,8 @@ def _rename_block_scope_typedefs(source: str, filename: str,
                 edits.append((t.offset, t.text, new))
             elif top == "tag" and nxt not in (K.IDENT, K.STAR):
                 pass
+            elif isinstance(top, list) and not top[1]:
+                pass        # an enumerator definition: not a typedef name
             else:
                 cur = scopes()
                 found = mapped(t.text)
@@ -1099,9 +1113,18 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
     const_ok_prev = (K.LBRACKET, K.COLON, K.LPAREN, K.PLUS, K.MINUS,
                      K.SLASH, K.LSHIFT, K.RSHIFT, K.AMP, K.PIPE, K.CARET,
                      K.TILDE, K.PERCENT)
+    pend = None     # [scope, key, new name, paren depth] of an enumerator
     while i < n:
         t = toks[i]
         k = t.kind
+        if pend is not None:
+            if k in (K.LPAREN, K.LBRACKET):
+                pend[3] += 1
+            elif k in (K.RPAREN, K.RBRACKET):
+                pend[3] -= 1
+            elif k in (K.COMMA, K.RBRACE) and pend[3] == 0:
+                pend[0][pend[1]] = pend[2]
+                pend = None
         if k is K.LBRACE:
             stack.append({})
         elif k is K.RBRACE:
@@ -1112,14 +1135,18 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
             top = stack[-1] if stack else None
             if prev in (K.DOT, K.ARROW):
                 pass
-            elif top == "enum" and prev in (K.LBRACE, K.COMMA):
+            elif (top == "enum" and prev in (K.LBRACE, K.COMMA)
+                  and pend is None):
                 cur = block_scopes()[-1] if block_scopes() else None
                 if cur is None:
                     file_consts.add(t.text)
                 else:
                     counter += 1
                     new = f"{t.text}__c{salt}_{counter}"
-                    cur["#" + t.text] = new
+                    # the scope of an enumerator starts after its
+                    # enumerator-definition (C23 6.2.1): the name joins
+                    # the scope at the comma or brace that ends it
+                    pend = [cur, "#" + t.text, new, 0]
                     edits.append((t.offset, t.text, new))
             elif top in ("struct", "union") and prev not in const_ok_prev:
                 pass
