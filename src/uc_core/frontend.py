@@ -781,6 +781,165 @@ def _typeof_typename_fix(src: str, tok) -> str | None:
     return src[:body[0][1]] + inner + src[body[-1][2]:]
 
 
+# ---- block-scope typedefs ---------------------------------------------------
+#
+# A typedef declared in a block belongs to the block (C23 6.2.1).  The back
+# ends keep one table of typedef names for a function, so ``typedef long T;``
+# in an inner block, with a ``typedef int T;`` at file scope, changed the
+# meaning of ``T`` for the rest of the function.  The pass below renames a
+# block-scope typedef that declares a name that an enclosing scope already
+# declares as a typedef, and the uses that the declaration governs, to a name
+# that no other scope can use.  A block typedef of a new name keeps its name.
+# A declaration ``int T;`` (after a basic type keyword) in the block hides the
+# typedef for the rest of the block.  A name after ``.`` or ``->`` is a member
+# and stays; in a struct or union body a name is a use only when an
+# identifier or ``*`` follows.
+
+
+def _typedef_declarator_offsets(toks, i):
+    """(end index, [index of each declarator name]) of the typedef
+    declaration that starts at ``toks[i]`` (the ``typedef`` token).  A name
+    is an identifier at depth 0 before ``;`` ``,`` ``[`` or ``(`` (not
+    after a tag keyword, ``.``, ``->`` or a qualifier), or the identifier
+    of a ``(*name)`` group."""
+    n = len(toks)
+    names = []
+    brace = 0
+    paren = 0
+    j = i + 1
+    decl_kw = (K.KW_VOID, K.KW_CHAR, K.KW_SHORT, K.KW_INT, K.KW_LONG,
+               K.KW_FLOAT, K.KW_DOUBLE, K.KW_SIGNED, K.KW_UNSIGNED,
+               K.KW_BOOL)
+    while j < n:
+        k = toks[j].kind
+        if k is K.LBRACE:
+            brace += 1
+        elif k is K.RBRACE:
+            brace -= 1
+        elif brace == 0:
+            if k is K.LPAREN:
+                paren += 1
+            elif k is K.RPAREN:
+                paren -= 1
+            elif k is K.SEMI and paren <= 0:
+                break
+            elif k is K.IDENT:
+                prev = toks[j - 1].kind
+                nxt = toks[j + 1].kind if j + 1 < n else None
+                if prev in (K.KW_STRUCT, K.KW_UNION, K.KW_ENUM, K.DOT,
+                            K.ARROW):
+                    pass
+                elif paren == 0 and nxt in (K.SEMI, K.COMMA, K.LBRACKET):
+                    names.append(j)
+                elif paren == 0 and nxt is K.LPAREN and (
+                        prev in decl_kw or prev is K.STAR):
+                    names.append(j)
+                elif paren == 1 and prev is K.STAR and nxt is K.RPAREN:
+                    names.append(j)
+        j += 1
+    return j, names
+
+
+def _rename_block_scope_typedefs(source: str, filename: str,
+                                 seed_typedefs=None) -> str:
+    if "typedef" not in source:
+        return source
+    import zlib
+    salt = "%04x" % (zlib.crc32(filename.encode("utf-8", "replace")) & 0xFFFF)
+    toks = list(c23_parser.scan(source, filename=filename))
+    kw_tag = (K.KW_STRUCT, K.KW_UNION, K.KW_ENUM)
+    decl_kw = (K.KW_VOID, K.KW_CHAR, K.KW_SHORT, K.KW_INT, K.KW_LONG,
+               K.KW_FLOAT, K.KW_DOUBLE, K.KW_SIGNED, K.KW_UNSIGNED,
+               K.KW_BOOL)
+    file_names: set[str] = set(seed_typedefs or ())
+    edits: list[tuple[int, str, str]] = []
+    # stack entries: dict (a block scope: name -> new name, or the same
+    # name for a hiding variable) or "tag" (the braces of a tag body)
+    stack: list = []
+    pending: dict[int, str] = {}      # token index -> name (a declarator)
+    counter = 0
+    n = len(toks)
+
+    def scopes():
+        return [d for d in stack if isinstance(d, dict)]
+
+    def mapped(name):
+        for d in reversed(scopes()):
+            if name in d:
+                return d[name]
+        return None
+
+    def known(name):
+        return name in file_names or any(
+            name in d and d[name] != name for d in scopes())
+
+    i = 0
+    while i < n:
+        t = toks[i]
+        k = t.kind
+        if k is K.LBRACE:
+            stack.append({})
+        elif k is K.RBRACE:
+            if stack:
+                stack.pop()
+        elif k in kw_tag:
+            # the braces of a tag body are not a block
+            j = i + 1
+            if j < n and toks[j].kind is K.IDENT:
+                j += 1
+            if k is K.KW_ENUM and j < n and toks[j].kind is K.COLON:
+                while j < n and toks[j].kind not in (K.LBRACE, K.SEMI,
+                                                     K.RPAREN, K.COMMA):
+                    j += 1
+            if j < n and toks[j].kind is K.LBRACE:
+                stack.append("tag")
+                i = j + 1
+                continue
+        elif k is K.KW_TYPEDEF:
+            end, names = _typedef_declarator_offsets(toks, i)
+            cur = scopes()
+            if not cur:
+                file_names.update(toks[x].text for x in names)
+            else:
+                for x in names:
+                    if known(toks[x].text):
+                        pending[x] = toks[x].text
+        elif k is K.IDENT:
+            prev = toks[i - 1].kind if i else None
+            nxt = toks[i + 1].kind if i + 1 < n else None
+            top = stack[-1] if stack else None
+            if prev in (K.DOT, K.ARROW):
+                pass
+            elif i in pending:
+                counter += 1
+                new = f"{t.text}__t{salt}_{counter}"
+                scopes()[-1][t.text] = new
+                edits.append((t.offset, t.text, new))
+            elif top == "tag" and nxt not in (K.IDENT, K.STAR):
+                pass
+            else:
+                cur = scopes()
+                found = mapped(t.text)
+                if found is not None and prev in decl_kw and cur:
+                    # ``int T;``: a variable hides the typedef
+                    cur[-1][t.text] = t.text
+                elif found is not None and found != t.text:
+                    edits.append((t.offset, t.text, found))
+        i += 1
+    if not edits:
+        return source
+    out = []
+    pos = 0
+    for off, tag, new in edits:
+        if off < pos or source[off:off + len(tag)] != tag:
+            return source
+        out.append(source[pos:off])
+        out.append(new)
+        pos = off + len(tag)
+    out.append(source[pos:])
+    return "".join(out)
+
+
 # ---- block-scope tags -------------------------------------------------------
 #
 # The tag of a struct, union or enum declared inside a block belongs to
@@ -969,7 +1128,8 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
 # ---- typedef tracker -------------------------------------------------------
 
 
-def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object]:
+def _make_typedef_filter(seed_typedefs: set[str] | None,
+                         source: str | None = None) -> tuple[object, object]:
     """Return ``(hooks, token_filter)`` wired to a TypedefTracker.
 
     The tracker accumulates IDENT names declared with the ``typedef``
@@ -1019,6 +1179,8 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     # namespaces. Tag/member contexts suppress but DON'T shadow.
     _SUPPRESS_PREV = _TYPESPEC_PREV | frozenset({
         K.KW_STRUCT, K.KW_UNION, K.KW_ENUM, K.DOT, K.ARROW,
+        # a label has its own namespace: ``goto s;`` with ``s`` a typedef
+        K.KW_GOTO,
     })
     # Tokens that, while a type specifier is "open", continue the
     # declarator *prefix* (pointers / type-qualifiers / extra spec
@@ -1053,7 +1215,30 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
     # The parser may re-query the same offset multiple times during
     # lookahead; only advance state when the offset changes so the
     # `prev` context stays stable for a given token.
-    state = [-1, K.UNKNOWN, K.UNKNOWN, "", 0, 0, [], False, set()]
+    # state[9] = brace depth of the ``typedef`` declaration being read, or
+    #            -1.  A typedef declaration that names a typedef again
+    #            (``{ typedef long T; T v; }`` with a file-scope ``T``)
+    #            declares a typedef, not a variable that hides it.
+    state = [-1, K.UNKNOWN, K.UNKNOWN, "", 0, 0, [], False, set(), -1]
+    # A label has its own namespace: ``s: stmt`` with ``s`` a typedef name
+    # is a label, when it stands where a statement starts, inside a
+    # function body (not in a struct body, where ``T : 3`` is a bit-field).
+    # kinds = for each open brace, "agg" (the body of a struct, union or
+    # enum) or "blk"; agg_wait = a struct, union or enum keyword (and
+    # maybe its tag) was the last thing seen.
+    kinds: list[str] = []
+    agg = [0]
+    _STMT_START = frozenset({K.SEMI, K.LBRACE, K.RBRACE, K.COLON, K.RPAREN,
+                             K.KW_ELSE, K.KW_DO})
+
+    def is_label(tok: Token) -> bool:
+        if source is None or not kinds or kinds[-1] == "agg":
+            return False
+        if state[1] not in _STMT_START:
+            return False
+        end = tok.offset + len(tok.text)
+        rest = source[end:end + 64].lstrip(" \t\r\n")
+        return rest.startswith(":") and not rest.startswith("::")
 
     def filter_(_ctx, tok: Token) -> Token:
         offset = getattr(tok, "offset", -1)
@@ -1066,6 +1251,16 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
             state[0] = offset
             # When we close a brace, drop any shadow set whose
             # entry-depth matches the brace count we just exited.
+            if tok.kind is K.LBRACE:
+                kinds.append("agg" if agg[0] else "blk")
+                agg[0] = 0
+            elif tok.kind is K.RBRACE:
+                if kinds:
+                    kinds.pop()
+            if tok.kind in (K.KW_STRUCT, K.KW_UNION, K.KW_ENUM):
+                agg[0] = 1
+            elif tok.kind is not K.IDENT and tok.kind is not K.LBRACE:
+                agg[0] = 0
             if tok.kind is K.RBRACE:
                 state[5] -= 1
                 while state[6] and state[6][-1][0] > state[5]:
@@ -1107,19 +1302,36 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
                 # stay unshadowed.
                 and prev_kind not in _NOT_DECL_PREV
             )
-            if declarator_here:
+            if tok.kind is K.KW_TYPEDEF:
+                state[9] = state[5]
+            elif tok.kind is K.SEMI and state[9] == state[5]:
+                state[9] = -1
+            if declarator_here and state[9] >= 0:
+                # the name of a typedef declaration: stays an IDENT here,
+                # and still names a type afterwards (no shadow)
+                state[8].add(offset)
+                state[7] = False
+            elif declarator_here:
                 # The declarator name shadows the typedef for the
                 # enclosing block. The +1 depth makes a parameter
                 # shadow survive the signature's paren pair and apply
                 # to the function body.
-                target_depth = state[5]
-                if not state[6] or state[6][-1][0] != target_depth + 1:
-                    state[6].append((target_depth + 1, set()))
+                # A name declared in a block lives until that block
+                # closes: depth = the block depth (a nested block that
+                # closes must not drop it).  A parameter (a signature at
+                # file scope) lives until the function body closes.
+                target_depth = state[5] + (1 if state[5] == 0 else 0)
+                if not state[6] or state[6][-1][0] != target_depth:
+                    state[6].append((target_depth, set()))
                 state[6][-1][1].add(tok.text)
                 state[8].add(offset)
                 state[7] = False               # declarator consumed
             elif emits_typedef or tok.kind in _TYPESPEC_PREV:
                 state[7] = True                # a type specifier
+            elif (tok.kind is K.IDENT and prev_kind in _NOT_DECL_PREV
+                  and prev_kind in (K.KW_STRUCT, K.KW_UNION, K.KW_ENUM)):
+                state[7] = True                # ``struct s``: the tag ends
+                #                                the specifier, a name follows
             elif state[7] and tok.kind in _DECL_CONTINUE:
                 pass                           # still in declarator prefix
             else:
@@ -1135,6 +1347,7 @@ def _make_typedef_filter(seed_typedefs: set[str] | None) -> tuple[object, object
             and prev_kind not in _SUPPRESS_PREV
             and not shadowed
             and offset not in state[8]
+            and not is_label(tok)
         ):
             return Token(
                 name="TYPEDEF_NAME",
@@ -1269,8 +1482,9 @@ def parse(
         packed_typedef_names.add(m.group(1))
     vector_names: set = set()
     pre = _strip_attributes(source, vector_names)
+    pre = _rename_block_scope_typedefs(pre, filename, seed_typedefs)
     pre = _rename_block_scope_tags(pre, filename)
-    hooks, filter_ = _make_typedef_filter(seed_typedefs)
+    hooks, filter_ = _make_typedef_filter(seed_typedefs, pre)
     try:
         try:
             unit = c23_parser.parse(
@@ -1288,7 +1502,7 @@ def parse(
                 if fixed is None:
                     raise
                 pre = fixed
-                hooks, filter_ = _make_typedef_filter(seed_typedefs)
+                hooks, filter_ = _make_typedef_filter(seed_typedefs, pre)
                 try:
                     unit = c23_parser.parse(
                         pre, filename=filename, hooks=hooks,
@@ -1314,7 +1528,7 @@ def parse(
             raise  # nothing pre-ANSI / GNU here — surface the real error
         # Fresh typedef-tracker state; the failed attempt left the
         # filter's scan position dirty.
-        hooks, filter_ = _make_typedef_filter(seed_typedefs)
+        hooks, filter_ = _make_typedef_filter(seed_typedefs, rewritten)
         unit = c23_parser.parse(
             rewritten, filename=filename, hooks=hooks, token_filter=filter_
         )

@@ -69,3 +69,41 @@ def test_a_variable_that_hides_an_enum_constant_gets_its_own_name():
     lines = out.split("\n")
     assert "{ int A__c" in lines[1] and lines[1].count("A__c") == 2
     assert lines[2] == "int g(void) { return A; }"
+
+
+# ---- block-scope typedefs and a typedef name as a label ---------------------
+
+from uc_core.frontend import _rename_block_scope_typedefs, parse
+
+
+def test_a_block_typedef_of_a_file_scope_name_is_renamed_in_its_block():
+    out = _rename_block_scope_typedefs(
+        "typedef int T;\nint f(void) { T a; { typedef long T; T v; } "
+        "return sizeof(T); }\n", "t.c")
+    inner = out.split("typedef long ")[1].split(";")[0]
+    assert inner.startswith("T__t") and out.count(inner) == 2
+    assert out.endswith("return sizeof(T); }\n")
+
+
+def test_a_block_typedef_of_a_new_name_is_not_renamed():
+    src = "typedef int T;\nint f(void) { typedef long U; U v; return 0; }\n"
+    assert _rename_block_scope_typedefs(src, "t.c") == src
+
+
+def test_a_variable_hides_the_block_typedef_for_the_rest_of_the_block():
+    out = _rename_block_scope_typedefs(
+        "typedef int T;\nint f(void) { typedef long T; { int T = 3; "
+        "return T; } }\n", "t.c")
+    assert out.count("T__t") == 1       # only the declarator
+
+
+def test_the_redeclared_typedef_parses():
+    unit = parse("typedef int T;\nint main(void) { { typedef long T; "
+                 "T v = 100000L; return (int) v; } }\n", "t.c")
+    assert unit is not None
+
+
+def test_goto_and_a_label_with_a_typedef_name_parse():
+    src = ("typedef struct s s;\nstruct s { int a; } s2;\n"
+           "int main(void) { goto s; struct s s; return s.a; s: return 0; }\n")
+    assert parse(src, "t.c") is not None

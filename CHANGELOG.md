@@ -10,6 +10,10 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Added
 
+- `Preprocessor.line_map` follows `#line` (the file name and the number of the directive) and a continued line: `Preprocessor.line_breaks` maps an output line index to the columns where a later source line begins, so a token after a backslash-newline gets its own source line. The output text does not change.
+- A block-scope typedef that redeclares a name that an enclosing scope declares as a typedef (`typedef int T; ... { typedef long T; T v; }`) is renamed with the uses it governs (`_rename_block_scope_typedefs`), so the back ends see two types, and the parser no longer reports `unexpected token IDENT v`.
+- A typedef name after `goto`, as a label (`s: ...` in a function body), and as the name of a struct tag followed by a declarator of the same name (`struct s s;`) parses.
+
 - `Preprocessor.line_map`: the (file, line) of each line of the text that `preprocess()` returns. The output has no line markers, so a host needs the map to name the real source line of a diagnostic. The output text does not change.
 
 - **`strict_allow` for strict mode.** `parse(..., strict_allow={"interrupt"})`

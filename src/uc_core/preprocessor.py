@@ -74,7 +74,14 @@ class Preprocessor:
         # output has no line markers: directives and continued lines
         # vanish, and an include is spliced in.
         self.line_map: list[tuple[str, int]] = []
+        # A logical line that joined continued lines (backslash-newline) is
+        # one output line, but its tokens come from several source lines:
+        # output line index -> [(column, file, line), ...], the places
+        # (0-based columns of the output line, ascending) where a later
+        # source line begins.  A token at or after a column has that line.
+        self.line_breaks: dict[int, list[tuple[int, str, int]]] = {}
         self._included_map: Optional[list] = None
+        self._included_breaks: Optional[dict] = None
 
         # Initialize predefined macros
         self._init_predefined_macros()
@@ -251,6 +258,7 @@ class Preprocessor:
         lines = source.split('\n')
         output_lines = []
         out_map = []   # (file, line) of each output line; see line_map
+        out_breaks: dict = {}   # see line_breaks
 
         # Track line offset for #line directive support
         # virtual_line = actual_line + line_offset
@@ -264,14 +272,17 @@ class Preprocessor:
 
             line = lines[i]
             actual_line = i + 1  # Actual line before continuation
+            starts = [(0, actual_line)]   # (offset in line, source line)
 
             # Handle line continuation
             while line.endswith('\\') and i + 1 < len(lines):
                 line = line[:-1] + lines[i + 1]
+                starts.append((len(line) - len(lines[i + 1]), i + 2))
                 i += 1
 
             # Save current_line before processing directive (it may change via #line)
             old_line = self.current_line
+            file_now = self.current_file
 
             # Check if this is a preprocessor directive
             stripped = line.lstrip()
@@ -280,7 +291,8 @@ class Preprocessor:
                 result = self._process_directive(stripped[1:].strip())
                 if result is not None:
                     output_lines.append(result)
-                    self._note_lines(out_map, result, filename, actual_line)
+                    self._note_lines(out_map, result, file_now, actual_line,
+                                     out_breaks, line_offset=line_offset)
                 # Check if #line changed current_line
                 if self.current_line != old_line:
                     # Update line_offset so future lines use the new numbering
@@ -293,10 +305,14 @@ class Preprocessor:
                        and self._has_unclosed_macro_call(line, lines[i + 1])):
                     i += 1
                     line = line + '\n' + lines[i]
+                    starts.append((len(line) - len(lines[i]), i + 1))
                 expanded = self._expand_macros(line)
                 output_lines.append(expanded)
                 self._included_map = None
-                self._note_lines(out_map, expanded, filename, actual_line)
+                self._note_lines(out_map, expanded, self.current_file,
+                                 actual_line, out_breaks,
+                                 line_offset=line_offset, starts=starts,
+                                 source_text=line)
             # else: skip line (inactive conditional block)
 
             i += 1
@@ -307,20 +323,89 @@ class Preprocessor:
                                    self.current_file, self.current_line)
 
         self.line_map = out_map
+        self.line_breaks = out_breaks
         return '\n'.join(output_lines)
 
+    @staticmethod
+    def _remap_offsets(old: str, new: str, offsets: list) -> list:
+        """Offsets in ``old`` as offsets in ``new`` (the macro expansion of
+        ``old``): the text that both share at the start and at the end keeps
+        its place; an offset inside the part that changed goes to the start
+        of the change."""
+        if old == new:
+            return list(offsets)
+        n = min(len(old), len(new))
+        pre = 0
+        while pre < n and old[pre] == new[pre]:
+            pre += 1
+        suf = 0
+        while (suf < n - pre
+               and old[len(old) - 1 - suf] == new[len(new) - 1 - suf]):
+            suf += 1
+        out = []
+        for off in offsets:
+            if off <= pre:
+                out.append(off)
+            elif off >= len(old) - suf:
+                out.append(off + len(new) - len(old))
+            else:
+                out.append(pre)
+        return out
+
     def _note_lines(self, out_map: list, text: str, filename: str,
-                    line: int) -> None:
+                    line: int, out_breaks: "dict | None" = None, *,
+                    line_offset: int = 0, starts: "list | None" = None,
+                    source_text: "str | None" = None) -> None:
         """Record the origin of each output line of one output item.
         An included file gives its own map (``_included_map``); any other
-        item starts at ``line`` of ``filename`` and goes on from there."""
+        item starts at ``line`` of ``filename`` and goes on from there.
+        ``starts`` are the (offset in ``source_text``, source line) of each
+        source line that the item joined (continued lines, and the lines of
+        a macro call); a source line that begins inside an output line is
+        recorded in ``out_breaks``.  ``line_offset`` is the shift that a
+        ``#line`` directive made."""
         inc = self._included_map
+        inc_breaks = self._included_breaks or {}
         self._included_map = None
-        if inc is not None and len(inc) == text.count('\n') + 1:
+        self._included_breaks = None
+        nlines = text.count('\n') + 1
+        if inc is not None and len(inc) == nlines:
+            base = len(out_map)
             out_map.extend(inc)
-        else:
-            out_map.extend((filename, line + k)
-                           for k in range(text.count('\n') + 1))
+            if out_breaks is not None:
+                for k, v in inc_breaks.items():
+                    out_breaks[base + k] = list(v)
+            return
+        base = len(out_map)
+        if not starts or len(starts) == 1 or source_text is None:
+            out_map.extend((filename, line + line_offset + k)
+                           for k in range(nlines))
+            return
+        offs = self._remap_offsets(source_text, text,
+                                   [o for o, _l in starts])
+        line_at = [0]                        # offset of each output line
+        for idx, ch in enumerate(text):
+            if ch == '\n':
+                line_at.append(idx + 1)
+        first = {}                           # output line -> source line
+        for (off, src), new_off in zip(starts, offs):
+            k = 0
+            while k + 1 < len(line_at) and line_at[k + 1] <= new_off:
+                k += 1
+            col = new_off - line_at[k]
+            if col == 0:
+                first[k] = src
+            elif out_breaks is not None:
+                out_breaks.setdefault(base + k, []).append(
+                    (col, filename, src + line_offset))
+        cur = line
+        for k in range(nlines):
+            cur = first.get(k, cur + (1 if k else 0))
+            out_map.append((filename, cur + line_offset))
+        if out_breaks is not None:
+            for k in range(nlines):
+                if base + k in out_breaks:
+                    out_breaks[base + k].sort()
 
     def _has_unclosed_macro_call(self, text: str,
                                  next_line: "str | None" = None) -> bool:
@@ -424,6 +509,7 @@ class Preprocessor:
         lines = source.split('\n')
         output_lines = []
         out_map = []
+        out_breaks: dict = {}
 
         i = 0
         while i < len(lines):
@@ -432,10 +518,12 @@ class Preprocessor:
             self.macros["__LINE__"] = Macro("__LINE__", body=str(self.current_line), is_predefined=True)
 
             line = lines[i]
+            starts = [(0, actual_line)]
 
             # Handle line continuation
             while line.endswith('\\') and i + 1 < len(lines):
                 line = line[:-1] + lines[i + 1]
+                starts.append((len(line) - len(lines[i + 1]), i + 2))
                 i += 1
 
             # Check if this is a preprocessor directive
@@ -445,7 +533,8 @@ class Preprocessor:
                 result = self._process_directive(stripped[1:].strip())
                 if result is not None:
                     output_lines.append(result)
-                    self._note_lines(out_map, result, filename, actual_line)
+                    self._note_lines(out_map, result, filename, actual_line,
+                                     out_breaks)
             elif self._is_active():
                 # Function-like macro invocations whose `( ... )` spans
                 # several lines (chocolate-doom's `PACKED_STRUCT(...)`,
@@ -457,10 +546,12 @@ class Preprocessor:
                        and self._has_unclosed_macro_call(line, lines[i + 1])):
                     i += 1
                     line = line + '\n' + lines[i]
+                    starts.append((len(line) - len(lines[i]), i + 1))
                 expanded = self._expand_macros(line)
                 output_lines.append(expanded)
                 self._included_map = None
-                self._note_lines(out_map, expanded, filename, actual_line)
+                self._note_lines(out_map, expanded, filename, actual_line,
+                                 out_breaks, starts=starts, source_text=line)
 
             i += 1
 
@@ -470,6 +561,7 @@ class Preprocessor:
                                    self.current_file, self.current_line)
 
         self._included_map = out_map
+        self._included_breaks = out_breaks
         return '\n'.join(output_lines)
 
     def preprocess_file(self, filepath: str) -> str:
