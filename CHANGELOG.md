@@ -10,6 +10,8 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Added
 
+- C23 enumerations with a fixed underlying type (6.7.3.3): `enum e : unsigned char { ... };`, `enum e : T;` and the anonymous `enum : T { ... }`. The grammar has no such form, so `parse` takes the `: T` out of the text (`_strip_enum_fixed_types`) and attaches `unit._enum_fixed_types`: the tag of each such enumeration, mapped to the list of the type texts that its declarations gave (an anonymous one gets the tag `__enum_fixed_<salt>_<n>`). A host gives the enumeration and its constants that type. `enum e : 3;` in a struct body stays a bit-field.
+
 - `Preprocessor.line_map` follows `#line` (the file name and the number of the directive) and a continued line: `Preprocessor.line_breaks` maps an output line index to the columns where a later source line begins, so a token after a backslash-newline gets its own source line. The output text does not change.
 - A block-scope typedef that redeclares a name that an enclosing scope declares as a typedef (`typedef int T; ... { typedef long T; T v; }`) is renamed with the uses it governs (`_rename_block_scope_typedefs`), so the back ends see two types, and the parser no longer reports `unexpected token IDENT v`.
 - A typedef name after `goto`, as a label (`s: ...` in a function body), and as the name of a struct tag followed by a declarator of the same name (`struct s s;`) parses.

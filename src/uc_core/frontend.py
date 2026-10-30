@@ -940,6 +940,100 @@ def _rename_block_scope_typedefs(source: str, filename: str,
     return "".join(out)
 
 
+# ---- enumerations with a fixed underlying type ---------------------------------
+#
+# C23 6.7.3.3: ``enum e : unsigned char { A, B };`` and the forward
+# declaration ``enum e : unsigned char;``.  The grammar has no such form, so
+# this pass takes ``: type`` out of the text (the parser then sees ``enum e
+# { A, B };`` and ``enum e;``) and keeps the type.  ``parse`` attaches the
+# table to the unit as ``unit._enum_fixed_types``: the tag of each such
+# enumeration -> the list of the type texts that its declarations gave (a
+# host compares them).  An anonymous ``enum : T { ... }`` gets the tag
+# ``__enum_fixed_<salt>_<n>``.  ``enum e : 3;`` in a struct body is a
+# bit-field, and stays.
+
+_ENUM_FIXED_RE = re.compile(r"\benum\s*(?:[A-Za-z_]\w*\s*)?:(?!:)")
+
+
+def _strip_enum_fixed_types(source: str, filename: str):
+    """(new source, {tag: [type text, ...]})."""
+    if not _ENUM_FIXED_RE.search(source):
+        return source, {}
+    import zlib
+    salt = "%04x" % (zlib.crc32(filename.encode("utf-8", "replace")) & 0xFFFF)
+    toks = list(c23_parser.scan(source, filename=filename))
+    n = len(toks)
+    edits: list[tuple[int, int, str]] = []     # (start, end, new text)
+    table: dict[str, list[str]] = {}
+    stack: list[str] = []          # "agg" (struct, union body) or "blk"
+    agg_wait = False
+    counter = 0
+    i = 0
+    while i < n:
+        t = toks[i]
+        k = t.kind
+        if k is K.LBRACE:
+            stack.append("agg" if agg_wait else "blk")
+            agg_wait = False
+        elif k is K.RBRACE:
+            if stack:
+                stack.pop()
+            agg_wait = False
+        elif k in (K.KW_STRUCT, K.KW_UNION):
+            agg_wait = True
+        elif k is K.KW_ENUM:
+            agg_wait = False
+            j = i + 1
+            tag = None
+            if j < n and toks[j].kind is K.IDENT:
+                tag = toks[j].text
+                j += 1
+            if j < n and toks[j].kind is K.COLON:
+                m = j + 1
+                while m < n and toks[m].kind not in (
+                        K.LBRACE, K.SEMI, K.COMMA, K.RPAREN, K.ASSIGN):
+                    m += 1
+                words = toks[j + 1:m]
+                after = toks[m].kind if m < n else None
+                in_agg = bool(stack) and stack[-1] == "agg"
+                first = words[0] if words else None
+                is_type = bool(words) and (
+                    first.kind is not K.IDENT
+                    and not first.kind.name.startswith(("INT_", "CHAR_")))
+                if (not is_type and words
+                        and all(w.kind is K.IDENT for w in words)
+                        and (after is K.LBRACE or not in_agg)):
+                    is_type = True
+                if is_type and (after is K.LBRACE or tag is not None):
+                    text = " ".join(w.text for w in words)
+                    if tag is None:
+                        counter += 1
+                        tag = f"__enum_fixed_{salt}_{counter}"
+                        edits.append((toks[j].offset,
+                                      words[-1].offset + len(words[-1].text),
+                                      " " + tag))
+                    else:
+                        edits.append((toks[j].offset,
+                                      words[-1].offset + len(words[-1].text),
+                                      ""))
+                    table.setdefault(tag, []).append(text)
+                    i = m
+                    continue
+        i += 1
+    if not edits:
+        return source, {}
+    out = []
+    pos = 0
+    for a, b, new in edits:
+        if a < pos:
+            return source, {}
+        out.append(source[pos:a])
+        out.append(new)
+        pos = b
+    out.append(source[pos:])
+    return "".join(out), table
+
+
 # ---- block-scope tags -------------------------------------------------------
 #
 # The tag of a struct, union or enum declared inside a block belongs to
@@ -1484,6 +1578,7 @@ def parse(
     pre = _strip_attributes(source, vector_names)
     pre = _rename_block_scope_typedefs(pre, filename, seed_typedefs)
     pre = _rename_block_scope_tags(pre, filename)
+    pre, enum_fixed = _strip_enum_fixed_types(pre, filename)
     hooks, filter_ = _make_typedef_filter(seed_typedefs, pre)
     try:
         try:
@@ -1536,6 +1631,7 @@ def parse(
     # rewritten away — downstream consumers (uc386 codegen) read this
     # to flip the GCC is_vector flag on the resolved ArrayType.
     unit._vector_typedef_names = vector_names
+    unit._enum_fixed_types = enum_fixed
     if packed_tag_names or packed_typedef_names:
         _mark_packed_structs(unit, packed_tag_names, packed_typedef_names)
     return unit
