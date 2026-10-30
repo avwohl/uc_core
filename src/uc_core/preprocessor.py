@@ -12,6 +12,7 @@ Implements full C preprocessor functionality:
 - Variadic macros (__VA_ARGS__)
 """
 
+import bisect
 import re
 import os
 from dataclasses import dataclass, field
@@ -142,7 +143,7 @@ class Preprocessor:
         self.macros["__TIME_INT__"] = Macro("__TIME_INT__", body=time_int, is_predefined=True)
 
     @staticmethod
-    def _strip_comments(source: str) -> str:
+    def _strip_comments(source: str, removed: "list | None" = None) -> str:
         """Replace /* ... */ and // ... comments with whitespace.
 
         Block comments → space (preserving embedded newlines so line
@@ -155,6 +156,14 @@ class Preprocessor:
         line-local skip in `_expand_macros` couldn't see a `/*` opened
         on a prior line, so macros named inside multi-line comments
         were incorrectly expanded.
+
+        ``removed``, when given, receives the index of the output line
+        that lost a physical line to a backslash-newline inside a block
+        comment (the splice is gone, so the later lines count one less
+        than the file does); ``_physical_line`` adds them back.  A line
+        comment that ends in a backslash goes on in the next line (phase 2
+        of translation joins the lines first): the newline stays, to keep
+        the count of lines.
         """
         out = []
         i = 0
@@ -215,6 +224,9 @@ class Preprocessor:
                     if (source[k] == '\\' and k + 1 < end
                             and source[k + 1] == '\n'):
                         k += 2  # phase 2 ate the splice; no newline
+                        if removed is not None:
+                            removed.append(
+                                sum(x.count('\n') for x in out))
                     elif source[k] == '\n':
                         out.append('\n')
                         k += 1
@@ -227,6 +239,10 @@ class Preprocessor:
             # text; the `\n` itself stays.
             if c == '/' and i + 1 < n and source[i + 1] == '/':
                 j = source.find('\n', i + 2)
+                # a backslash before the newline joins the next line
+                while j > 0 and source[j - 1] == '\\':
+                    out.append('\n')
+                    j = source.find('\n', j + 1)
                 if j < 0:
                     return ''.join(out)
                 i = j  # leave the \n in place
@@ -253,7 +269,9 @@ class Preprocessor:
 
         # Strip comments up front so multi-line /* */ blocks don't
         # leak macro-expansion into their interior on subsequent lines.
-        source = self._strip_comments(source)
+        removed: list = []
+        source = self._strip_comments(source, removed)
+        phys = lambda idx: idx + 1 + bisect.bisect_left(removed, idx)  # noqa: E731
 
         lines = source.split('\n')
         output_lines = []
@@ -266,18 +284,18 @@ class Preprocessor:
 
         i = 0
         while i < len(lines):
-            self.current_line = i + 1 + line_offset
+            self.current_line = phys(i) + line_offset
             # Update __LINE__
             self.macros["__LINE__"] = Macro("__LINE__", body=str(self.current_line), is_predefined=True)
 
             line = lines[i]
-            actual_line = i + 1  # Actual line before continuation
+            actual_line = phys(i)  # Actual line before continuation
             starts = [(0, actual_line)]   # (offset in line, source line)
 
             # Handle line continuation
             while line.endswith('\\') and i + 1 < len(lines):
                 line = line[:-1] + lines[i + 1]
-                starts.append((len(line) - len(lines[i + 1]), i + 2))
+                starts.append((len(line) - len(lines[i + 1]), phys(i + 1)))
                 i += 1
 
             # Save current_line before processing directive (it may change via #line)
@@ -305,7 +323,7 @@ class Preprocessor:
                        and self._has_unclosed_macro_call(line, lines[i + 1])):
                     i += 1
                     line = line + '\n' + lines[i]
-                    starts.append((len(line) - len(lines[i]), i + 1))
+                    starts.append((len(line) - len(lines[i]), phys(i)))
                 expanded = self._expand_macros(line)
                 output_lines.append(expanded)
                 self._included_map = None
@@ -504,17 +522,20 @@ class Preprocessor:
         self.macros["__FILE__"] = Macro("__FILE__", body=f'"{filename}"', is_predefined=True)
 
         # Strip comments up front (see preprocess() — same reason).
-        source = self._strip_comments(source)
+        removed: list = []
+        source = self._strip_comments(source, removed)
+        phys = lambda idx: idx + 1 + bisect.bisect_left(removed, idx)  # noqa: E731
 
         lines = source.split('\n')
         output_lines = []
         out_map = []
         out_breaks: dict = {}
+        line_offset = 0             # the shift that a #line made
 
         i = 0
         while i < len(lines):
-            self.current_line = i + 1
-            actual_line = i + 1
+            self.current_line = phys(i) + line_offset
+            actual_line = phys(i)
             self.macros["__LINE__"] = Macro("__LINE__", body=str(self.current_line), is_predefined=True)
 
             line = lines[i]
@@ -523,8 +544,11 @@ class Preprocessor:
             # Handle line continuation
             while line.endswith('\\') and i + 1 < len(lines):
                 line = line[:-1] + lines[i + 1]
-                starts.append((len(line) - len(lines[i + 1]), i + 2))
+                starts.append((len(line) - len(lines[i + 1]), phys(i + 1)))
                 i += 1
+
+            old_line = self.current_line
+            file_now = self.current_file
 
             # Check if this is a preprocessor directive
             stripped = line.lstrip()
@@ -533,8 +557,10 @@ class Preprocessor:
                 result = self._process_directive(stripped[1:].strip())
                 if result is not None:
                     output_lines.append(result)
-                    self._note_lines(out_map, result, filename, actual_line,
-                                     out_breaks)
+                    self._note_lines(out_map, result, file_now, actual_line,
+                                     out_breaks, line_offset=line_offset)
+                if self.current_line != old_line:
+                    line_offset = self.current_line - actual_line
             elif self._is_active():
                 # Function-like macro invocations whose `( ... )` spans
                 # several lines (chocolate-doom's `PACKED_STRUCT(...)`,
@@ -546,12 +572,14 @@ class Preprocessor:
                        and self._has_unclosed_macro_call(line, lines[i + 1])):
                     i += 1
                     line = line + '\n' + lines[i]
-                    starts.append((len(line) - len(lines[i]), i + 1))
+                    starts.append((len(line) - len(lines[i]), phys(i)))
                 expanded = self._expand_macros(line)
                 output_lines.append(expanded)
                 self._included_map = None
-                self._note_lines(out_map, expanded, filename, actual_line,
-                                 out_breaks, starts=starts, source_text=line)
+                self._note_lines(out_map, expanded, self.current_file,
+                                 actual_line, out_breaks,
+                                 line_offset=line_offset, starts=starts,
+                                 source_text=line)
 
             i += 1
 
@@ -1801,13 +1829,22 @@ class Preprocessor:
         return None
 
     def _process_line(self, args: str) -> None:
-        """Process #line directive."""
-        match = re.match(r'(\d+)(?:\s+"([^"]*)")?', args.strip())
-        if match:
-            self.current_line = int(match.group(1)) - 1  # Will be incremented
-            if match.group(2):
-                self.current_file = match.group(2)
-                self.macros["__FILE__"] = Macro("__FILE__", body=f'"{self.current_file}"', is_predefined=True)
+        """Process #line directive: ``#line digit-sequence ["file"]``
+        (C23 6.10.8.1; the digits are decimal, and at most 2147483647)."""
+        match = re.match(r'(\d+)(?![\w.])(?:\s+"([^"]*)")?\s*$', args.strip())
+        if not match:
+            raise PreprocessorError(
+                f"#line needs a decimal line number and an optional file "
+                f"name in quotes: #line {args.strip()}",
+                self.current_file, self.current_line)
+        if int(match.group(1)) > 2147483647:
+            raise PreprocessorError(
+                f"#line number {match.group(1)} is greater than 2147483647",
+                self.current_file, self.current_line)
+        self.current_line = int(match.group(1)) - 1  # Will be incremented
+        if match.group(2):
+            self.current_file = match.group(2)
+            self.macros["__FILE__"] = Macro("__FILE__", body=f'"{self.current_file}"', is_predefined=True)
         return None
 
 

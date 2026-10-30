@@ -107,3 +107,21 @@ def test_goto_and_a_label_with_a_typedef_name_parse():
     src = ("typedef struct s s;\nstruct s { int a; } s2;\n"
            "int main(void) { goto s; struct s s; return s.a; s: return 0; }\n")
     assert parse(src, "t.c") is not None
+
+
+def test_a_block_typedef_does_not_rename_a_tag_of_the_same_name():
+    from uc_core import frontend
+    src = ("typedef int T;\nstruct T { int a; };\n"
+           "int f(void) { { typedef long T; struct T s; return sizeof(T); } }\n")
+    out = frontend._rename_block_scope_typedefs(src, "x.c")
+    assert "struct T s;" in out and "struct T { int a; }" in out
+    assert "typedef long T__t" in out
+
+
+def test_a_typedef_redeclared_in_a_nested_block_is_renamed():
+    from uc_core import frontend
+    src = ("int f(void) { typedef long long L; { typedef char L; L c; }\n"
+           "  return sizeof(L); }\n")
+    out = frontend._rename_block_scope_typedefs(src, "x.c")
+    assert "typedef char L__t" in out
+    assert "return sizeof(L);" in out

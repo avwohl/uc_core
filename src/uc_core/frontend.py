@@ -870,8 +870,11 @@ def _rename_block_scope_typedefs(source: str, filename: str,
         return None
 
     def known(name):
+        # a typedef name of the file, of an enclosing block (renamed or
+        # not: the key ("td", name) marks a block typedef of that name)
         return name in file_names or any(
-            name in d and d[name] != name for d in scopes())
+            (name in d and d[name] != name) or ("td", name) in d
+            for d in scopes())
 
     i = 0
     while i < n:
@@ -904,12 +907,14 @@ def _rename_block_scope_typedefs(source: str, filename: str,
                 for x in names:
                     if known(toks[x].text):
                         pending[x] = toks[x].text
+                    else:
+                        cur[-1][("td", toks[x].text)] = True
         elif k is K.IDENT:
             prev = toks[i - 1].kind if i else None
             nxt = toks[i + 1].kind if i + 1 < n else None
             top = stack[-1] if stack else None
-            if prev in (K.DOT, K.ARROW):
-                pass
+            if prev in (K.DOT, K.ARROW) or prev in kw_tag:
+                pass        # a member, or a tag: not a typedef name
             elif i in pending:
                 counter += 1
                 new = f"{t.text}__t{salt}_{counter}"
