@@ -1800,6 +1800,10 @@ class Preprocessor:
             if lt == ('other', ',') and rt[0] == 'pm':
                 # GNU: `, ## empty` drops the comma
                 out[l:r + 1] = [('pm', '')]
+            elif lt == ('other', ','):
+                # GNU: `, ## args` keeps the comma and does not paste
+                del out[i]
+                continue
             else:
                 if lt[0] == 'pm':
                     new = rt
