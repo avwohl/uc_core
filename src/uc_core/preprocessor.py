@@ -1517,7 +1517,10 @@ class Preprocessor:
                     else:
                         # Object-like macro
                         self.expanding.add(name)
-                        expanded = self._expand_macros(macro.body)
+                        body = macro.body
+                        if '##' in body:
+                            body = self._paste_tokens(self._pp_tokens(body))
+                        expanded = self._expand_macros(body)
                         self.expanding.discard(name)
                         result.append(expanded)
                         i = end
@@ -1630,46 +1633,23 @@ class Preprocessor:
         while len(args) < len(macro.params):
             args.append('')
 
-        # Handle # (stringification) operator
-        body = self._handle_stringification(body, macro.params, args)
-
-        # Handle ## (token pasting) operator (uses unexpanded args).
-        body = self._handle_token_pasting(body, macro.params, args)
-
         # For non-#/## uses, parameter values are macro-expanded before
-        # substitution into the body — that's the standard C rule. The
-        # token-pasting handler above already consumed `param ## param`
-        # uses with unexpanded args, so the remaining param mentions in
-        # the body are the ones that want the expansion.
+        # substitution into the body (C23 6.10.5.2).  A parameter next to
+        # `##` and the operand of `#` use the unexpanded argument.
         expanded_args = []
         for arg in args:
             if arg and any(
                 m_name in arg for m_name in self.macros if m_name not in self.expanding
             ):
-                # Re-scan the argument with the current set of macros.
                 expanded_args.append(self._expand_macros(arg))
             else:
                 expanded_args.append(arg)
-        # Regular parameter substitution — one pass, simultaneous.
-        # C99 §6.10.3.1 requires every parameter substitution to happen
-        # at the same time; iterating per-param breaks when one arg's
-        # text contains a token that matches another param's name. E.g.
-        # the macro `M(beg, slice) → beg + slice` invoked with
-        # `M(slice.start, value_items)`:
-        #   - simultaneous: `(slice.start) + (value_items)`
-        #   - iterative beg-then-slice: `(value_items.start) + (value_items)`
-        # The iterative form re-substitutes the `slice` token that came
-        # from the `beg` arg's value (`slice.start`), which is wrong —
-        # that `slice` is the user's identifier, not the parameter.
-        # Match any param via alternation, look up the arg in a single dict.
-        if macro.params:
-            param_map = dict(zip(macro.params, expanded_args))
-            param_alt = "|".join(re.escape(p) for p in macro.params)
-            body = re.sub(
-                rf'\b({param_alt})\b(?![\'"])',
-                lambda m, pm=param_map: pm[m.group(1)],
-                body,
-            )
+        # The replacement list is a list of preprocessing tokens.  A
+        # parameter is replaced only where the token is an identifier
+        # (C23 6.10.5): the text of a string literal or of a character
+        # constant is never touched.  All parameters are replaced at
+        # the same time.
+        body = self._substitute_body(macro, args, expanded_args)
 
         # Mark macro as being expanded to prevent recursion
         self.expanding.add(macro.name)
@@ -1687,78 +1667,180 @@ class Preprocessor:
             )
         return result
 
-    def _handle_stringification(self, body: str, params: list[str], args: list[str]) -> str:
-        """Handle # operator (stringification)."""
-        for param, arg in zip(params, args):
-            # Match # followed by parameter, but NOT ## (token pasting)
-            # Use negative lookbehind to avoid matching ##
-            pattern = rf'(?<!#)#\s*{re.escape(param)}\b'
-            # Stringify the argument
-            stringified = '"' + arg.replace('\\', '\\\\').replace('"', '\\"') + '"'
-            # Pass the replacement as a lambda so `re.sub` doesn't
-            # interpret `\\` in `stringified` as a back-reference and
-            # silently drop a backslash. (`r'\\'` in the replacement
-            # means a literal `\` to re.sub.)
-            body = re.sub(pattern, lambda m, s=stringified: s, body)
-        return body
+    # Preprocessing tokens of a replacement list or of an argument.
+    # Order matters: comments, then literals (with their encoding
+    # prefix), then blue-paint sentinels, numbers, identifiers.
+    _PP_TOKEN = re.compile(
+        r"""(?P<ws>[ \t\n\r\f\v]+|/\*.*?\*/|//[^\n]*)
+          |(?P<lit>(?:u8|u|U|L)?(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'))
+          |(?P<sent>\x01[^\x02]*\x02)
+          |(?P<num>\.?[0-9](?:[eEpP][+-]|'[A-Za-z0-9_]|[A-Za-z0-9_.])*)
+          |(?P<id>[A-Za-z_][A-Za-z0-9_]*)
+          |(?P<paste>\#\#)
+          |(?P<other>\.\.\.|<<=|>>=|->|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\||::
+                    |[*/%+\-&^|]=|.)""",
+        re.VERBOSE | re.DOTALL)
 
-    def _handle_token_pasting(self, body: str, params: list[str], args: list[str]) -> str:
-        """Handle ## operator (token pasting)."""
-        # Build param->arg mapping
-        param_map = dict(zip(params, args))
+    @classmethod
+    def _pp_tokens(cls, text: str) -> list:
+        """Split text into (kind, text) preprocessing tokens.  A run of
+        white space or a comment is one ('ws', ' ') token."""
+        out = []
+        for m in cls._PP_TOKEN.finditer(text):
+            kind = m.lastgroup
+            if kind == 'ws':
+                if out and out[-1][0] == 'ws':
+                    continue
+                out.append(('ws', ' '))
+            else:
+                out.append((kind, m.group()))
+        return out
 
-        # GCC extension: `, ## __VA_ARGS__` swallows the comma when
-        # __VA_ARGS__ expands to empty (no variadic args were passed).
-        # Same rule applies to a generic empty parameter — `, ## x`
-        # with x empty drops the comma. Apply this BEFORE the regular
-        # paste loop so we don't end up with stray `,` + empty-token
-        # pairs.
-        empty_paste_pat = re.compile(
-            rf',\s*##\s*([a-zA-Z_][a-zA-Z0-9_]*)'
-        )
-        def _swallow_comma(m: 're.Match') -> str:
-            param_name = m.group(1)
-            if param_name in param_map and param_map[param_name] == '':
-                return ''
-            return m.group(0)
-        body = empty_paste_pat.sub(_swallow_comma, body)
+    @classmethod
+    def _stringify(cls, arg: str) -> str:
+        """The `#` operator: spell the argument as a string literal.
+        White space between tokens becomes one space; only a `\\` or
+        `"` inside a string literal or character constant is escaped."""
+        parts = []
+        for kind, txt in cls._pp_tokens(arg.replace('\x01', '').replace('\x02', '')):
+            if kind == 'lit':
+                txt = txt.replace('\\', '\\\\').replace('"', '\\"')
+            parts.append(txt)
+        return '"' + ''.join(parts).strip() + '"'
 
-        # Process ## operators from left to right
-        # Token pattern: identifier or single punctuator
-        token_pat = r'([a-zA-Z_][a-zA-Z0-9_]*|[^\s])'
-        paste_pat = rf'{token_pat}\s*##\s*{token_pat}'
+    def _substitute_body(self, macro: Macro, args: list, expanded: list) -> str:
+        """Replace the parameters of a function-like macro in its
+        replacement list, then apply `#`, `##` and `__VA_OPT__`."""
+        toks = self._pp_tokens(macro.body)
+        param_idx = {p: i for i, p in enumerate(macro.params)}
+        has_va = macro.is_variadic
+        va_present = has_va and args[-1].strip() != ''
 
-        while '##' in body:
-            # Find the ## and get tokens on either side
-            match = re.search(paste_pat, body)
-            if not match:
-                # No valid ## pattern found, remove any stray ##
-                body = body.replace('##', '')
-                break
+        def nonws(lst, i, step):
+            i += step
+            while 0 <= i < len(lst) and lst[i][0] == 'ws':
+                i += step
+            return i
 
-            left_token = match.group(1)
-            right_token = match.group(2)
+        def subst(lst):
+            out = []
+            i = 0
+            while i < len(lst):
+                kind, txt = lst[i]
+                if kind == 'other' and txt == '#':
+                    j = nonws(lst, i, 1)
+                    if j < len(lst) and lst[j][0] == 'id' and lst[j][1] in param_idx:
+                        out.append(('lit', self._stringify(args[param_idx[lst[j][1]]])))
+                        i = j + 1
+                        continue
+                if kind == 'id' and txt == '__VA_OPT__' and has_va:
+                    j = nonws(lst, i, 1)
+                    if j < len(lst) and lst[j] == ('other', '('):
+                        depth = 0
+                        k = j
+                        while k < len(lst):
+                            if lst[k] == ('other', '('):
+                                depth += 1
+                            elif lst[k] == ('other', ')'):
+                                depth -= 1
+                                if depth == 0:
+                                    break
+                            k += 1
+                        if k < len(lst):
+                            if va_present:
+                                out.extend(subst(lst[j + 1:k]))
+                            else:
+                                out.append(('pm', ''))
+                            i = k + 1
+                            continue
+                if kind == 'id' and txt in param_idx:
+                    n = param_idx[txt]
+                    p = nonws(lst, i, -1)
+                    q = nonws(lst, i, 1)
+                    near_paste = ((p >= 0 and lst[p][0] == 'paste')
+                                  or (q < len(lst) and lst[q][0] == 'paste'))
+                    if near_paste:
+                        rt = self._pp_tokens(args[n])
+                        # trim edge white space of the operand
+                        while rt and rt[0][0] == 'ws':
+                            rt.pop(0)
+                        while rt and rt[-1][0] == 'ws':
+                            rt.pop()
+                        out.extend(rt if rt else [('pm', '')])
+                    else:
+                        out.append(('chunk', expanded[n]))
+                    i += 1
+                    continue
+                out.append((kind, txt))
+                i += 1
+            return out
 
-            # Substitute parameters with their arguments
-            if left_token in param_map:
-                left_token = param_map[left_token]
-            if right_token in param_map:
-                right_token = param_map[right_token]
+        out = subst(toks)
+        return self._paste_tokens(out)
 
-            # Concatenate the tokens (empty tokens just disappear)
-            pasted = left_token + right_token
-
-            # Check if we need to preserve token boundary after paste
-            # If the right operand was empty and there's more text after,
-            # add a space to separate tokens
-            suffix = body[match.end():]
-            if not right_token and suffix and not suffix[0].isspace():
-                pasted = pasted + ' '
-
-            # Replace the entire match with the pasted result
-            body = body[:match.start()] + pasted + suffix
-
-        return body
+    @staticmethod
+    def _paste_tokens(out: list) -> str:
+        """Apply every `##` (left to right), drop placemarkers and join."""
+        i = 0
+        while i < len(out):
+            if out[i][0] != 'paste':
+                i += 1
+                continue
+            l = i - 1
+            while l >= 0 and out[l][0] == 'ws':
+                l -= 1
+            r = i + 1
+            while r < len(out) and out[r][0] == 'ws':
+                r += 1
+            if l < 0 or r >= len(out):
+                # stray ## at an edge: drop the operator
+                del out[i]
+                continue
+            lt, rt = out[l], out[r]
+            if lt == ('other', ',') and rt[0] == 'pm':
+                # GNU: `, ## empty` drops the comma
+                out[l:r + 1] = [('pm', '')]
+            else:
+                if lt[0] == 'pm':
+                    new = rt
+                elif rt[0] == 'pm':
+                    new = lt
+                else:
+                    new = ('id' if lt[0] in ('id', 'num') else 'other',
+                           lt[1] + rt[1])
+                out[l:r + 1] = [new]
+            i = l
+        # Join.  Two tokens that were separate must not fuse into one
+        # (`+` and `+` from `Q(+,)+`, or `-` and `-1`): a space goes
+        # between them when lexing their text together gives another
+        # token list.
+        res = []
+        prev_last = None
+        for kind, txt in out:
+            if kind == 'pm' or txt == '':
+                continue
+            if kind == 'ws':
+                prev_last = None
+                res.append(' ')
+                continue
+            first = last = txt
+            if kind == 'chunk':
+                tl = [t for t in Preprocessor._pp_tokens(txt) if t[0] != 'ws']
+                if not tl:
+                    continue
+                first, last = tl[0][1], tl[-1][1]
+                if txt[0].isspace():
+                    prev_last = None
+                trailing_ws = txt[-1].isspace()
+            else:
+                trailing_ws = False
+            if prev_last is not None:
+                again = [t[1] for t in Preprocessor._pp_tokens(prev_last + first)]
+                if not (len(again) >= 2 and again[0] == prev_last):
+                    res.append(' ')
+            res.append(txt)
+            prev_last = None if trailing_ws else last
+        return ''.join(res)
 
     def _process_pragma(self, args: str) -> None:
         """Process #pragma directive."""

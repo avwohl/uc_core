@@ -8,6 +8,10 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ## Unreleased
 
+### Fixed
+
+- A macro parameter is no longer replaced inside a string literal or a character constant of the replacement list. `#define OUT(s) printf("%s", s)` with `OUT("x")` gave `printf("%"x"", "x")`. The replacement list is now split into preprocessing tokens (identifiers, numbers, literals with their `u8`/`u`/`U`/`L` prefix, punctuators, white space). A parameter is replaced only where the token is an identifier (C23 6.10.5). `#` stringizing escapes only the text inside a literal and collapses white space. `##` pastes tokens and also works in an object-like macro. `__VA_OPT__` is supported. Two tokens that were separate (`-` and `-1`, or `+` and `+` from an empty paste) stay separate. `tests/test_macro_tokens.py` compares the expansion with the host `cc -E`.
+
 ### Added
 
 - C23 enumerations with a fixed underlying type (6.7.3.3): `enum e : unsigned char { ... };`, `enum e : T;` and the anonymous `enum : T { ... }`. The grammar has no such form, so `parse` takes the `: T` out of the text (`_strip_enum_fixed_types`) and attaches `unit._enum_fixed_types`: the tag of each such enumeration, mapped to the list of the type texts that its declarations gave (an anonymous one gets the tag `__enum_fixed_<salt>_<n>`). A host gives the enumeration and its constants that type. `enum e : 3;` in a struct body stays a bit-field.
