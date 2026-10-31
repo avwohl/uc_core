@@ -171,3 +171,69 @@ def test_an_enumerator_named_like_a_typedef_is_not_renamed():
            "enum { T2 = 1 }; return T2; }\n")
     out = _rename_block_scope_typedefs(src, "t.c")
     assert "T2 = 1" in out and "return T2" in out
+
+
+# ---- typedef of a tag before the block definition of the tag ---------------
+
+
+def test_a_tag_that_a_block_uses_first_belongs_to_the_block():
+    out = _r("int main(void) { typedef struct T T; struct T { int a; }; "
+             "return sizeof(T); }")
+    names = [w for w in out.replace(";", " ").split() if w.startswith("T__b")]
+    assert len(names) == 2 and names[0] == names[1]
+
+
+def test_a_tag_of_the_file_is_not_renamed_by_a_use_in_a_block():
+    src = "struct T { int a; };\nint f(void) { struct T x; return x.a; }\n"
+    assert _r(src) == src
+
+
+# ---- a typedef name in a struct or union body ------------------------------
+
+
+def test_a_block_typedef_in_a_member_array_bound_is_renamed():
+    out = _rename_block_scope_typedefs(
+        "typedef int T;\nint f(void) { typedef char T; "
+        "struct S { T a[sizeof(T) + 2]; } s; return sizeof s.a; }\n", "t.c")
+    inner = out.split("typedef char ")[1].split(";")[0]
+    assert inner.startswith("T__t")
+    assert out.count(inner) == 3          # the declarator and both uses
+
+
+def test_a_member_with_the_name_of_a_typedef_is_not_renamed():
+    out = _rename_block_scope_typedefs(
+        "typedef int T;\nint f(void) { typedef char T; "
+        "struct S { int T; } s; return s.T; }\n", "t.c")
+    assert "int T;" in out and "s.T" in out
+
+
+# ---- a parameter hides a file-scope enumerator ------------------------------
+
+
+def test_a_parameter_hides_an_enumerator_in_the_body():
+    out = _r("enum { A = 2 };\nstatic int f(int A) { enum { B = 3 }; "
+             "return A + B; }\nint g(void) { return A; }\n")
+    lines = out.split("\n")
+    new = lines[1].split("(int ")[1].split(")")[0]
+    assert new.startswith("A__c")
+    assert "return " + new + " + " in lines[1]
+    assert lines[2] == "int g(void) { return A; }"
+
+
+def test_a_pointer_and_a_function_pointer_parameter_hide_enumerators():
+    out = _r("enum { A = 2, C = 5 };\nint f(char *A, int (*C)(int)) "
+             "{ return A[0] + C(1); }\n")
+    assert out.count("A__c") == 2 and out.count("C__c") == 2
+
+
+def test_a_prototype_and_a_call_keep_the_enumerator():
+    src = ("enum { A = 2 };\nint f(int A);\nint g(void) { return f(A); }\n")
+    out = _r(src)
+    assert "int f(int A);" in out and "return f(A);" in out
+
+
+def test_a_parameter_named_like_an_enumerator_is_the_parameter_in_the_program():
+    src = ("enum { A = 2 };\nint g(int A) { return A + 3; }\n"
+           "int main(void) { return g(10); }\n")
+    out = _r(src)
+    assert "return A + 3" not in out and "g(10)" in out

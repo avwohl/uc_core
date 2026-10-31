@@ -840,6 +840,13 @@ def _typedef_declarator_offsets(toks, i):
     return j, names
 
 
+# in a struct or union body, a name after one of these is in an expression
+# (a bound, a bit-field width, sizeof (T)), so it is a use, not a member
+_TAG_BODY_USE_PREV = frozenset((
+    K.LPAREN, K.LBRACKET, K.COLON, K.PLUS, K.MINUS, K.SLASH, K.LSHIFT,
+    K.RSHIFT, K.AMP, K.PIPE, K.CARET, K.TILDE, K.PERCENT))
+
+
 def _rename_block_scope_typedefs(source: str, filename: str,
                                  seed_typedefs=None) -> str:
     if "typedef" not in source:
@@ -932,8 +939,9 @@ def _rename_block_scope_typedefs(source: str, filename: str,
                 new = f"{t.text}__t{salt}_{counter}"
                 scopes()[-1][t.text] = new
                 edits.append((t.offset, t.text, new))
-            elif top == "tag" and nxt not in (K.IDENT, K.STAR):
-                pass
+            elif (top == "tag" and nxt not in (K.IDENT, K.STAR)
+                  and prev not in _TAG_BODY_USE_PREV):
+                pass        # a member declarator, not a use of the typedef
             elif isinstance(top, list) and not top[1]:
                 pass        # an enumerator definition: not a typedef name
             else:
@@ -1114,9 +1122,74 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
                      K.SLASH, K.LSHIFT, K.RSHIFT, K.AMP, K.PIPE, K.CARET,
                      K.TILDE, K.PERCENT)
     pend = None     # [scope, key, new name, paren depth] of an enumerator
+    # the parameters of a function definition that hide a file-scope
+    # enumerator: token index -> new name, and the body brace's index
+    param_hide: dict[int, str] = {}
+    body_hide: tuple[int, dict] = (-1, {})
+    plist_end = -1  # index of the ")" of the parameter list in view
+
+    def find_params(lp):
+        """(index of the matching ")", [token indexes of the parameter
+        names]) of a file-scope parenthesis, or None."""
+        depth = 0
+        bracket = 0
+        seg: list[int] = []
+        segs: list[list[int]] = []
+        for j in range(lp, n):
+            kj = toks[j].kind
+            if kj is K.LPAREN:
+                depth += 1
+                if depth == 1:
+                    continue
+            elif kj is K.RPAREN:
+                depth -= 1
+                if depth == 0:
+                    segs.append(seg)
+                    return j, segs
+            elif kj is K.LBRACKET:
+                bracket += 1
+            elif kj is K.RBRACKET:
+                bracket -= 1
+            elif kj is K.COMMA and depth == 1 and bracket == 0:
+                segs.append(seg)
+                seg = []
+                continue
+            elif kj in (K.LBRACE, K.SEMI):
+                return None
+            if depth == 1 and bracket == 0 and kj is K.IDENT:
+                seg.append(j)
+            elif (depth == 2 and kj is K.IDENT and toks[j - 1].kind is K.STAR
+                  and j + 1 < n and toks[j + 1].kind in (K.RPAREN,
+                                                         K.LBRACKET)):
+                seg.append(j)           # a function pointer: (*name)
+        return None
+
     while i < n:
         t = toks[i]
         k = t.kind
+        if (k is K.LPAREN and not stack and i > plist_end and file_consts
+                and i and toks[i - 1].kind in (K.IDENT, K.RPAREN)):
+            fp = find_params(i)
+            if fp is not None:
+                plist_end = fp[0]
+                if fp[0] + 1 < n and toks[fp[0] + 1].kind is K.LBRACE:
+                    mapping = {}
+                    for seg in fp[1]:
+                        # the declarator name is the last identifier; a
+                        # lone identifier is a type or no parameter
+                        if len(seg) == 1 and toks[seg[0] - 1].kind in (
+                                K.LPAREN, K.COMMA):
+                            continue
+                        if seg and toks[seg[-1]].text in file_consts:
+                            counter += 1
+                            new = f"{toks[seg[-1]].text}__c{salt}_{counter}"
+                            param_hide[seg[-1]] = new
+                            mapping["#" + toks[seg[-1]].text] = new
+                    body_hide = (fp[0] + 1, mapping)
+        if i in param_hide:
+            edits.append((t.offset, t.text, param_hide[i]))
+            i += 1
+            continue
         if pend is not None:
             if k in (K.LPAREN, K.LBRACKET):
                 pend[3] += 1
@@ -1126,7 +1199,7 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
                 pend[0][pend[1]] = pend[2]
                 pend = None
         if k is K.LBRACE:
-            stack.append({})
+            stack.append(dict(body_hide[1]) if i == body_hide[0] else {})
         elif k is K.RBRACE:
             if stack:
                 stack.pop()
@@ -1224,6 +1297,13 @@ def _rename_block_scope_tags(source: str, filename: str) -> str:
                         counter += 1
                         new = f"{tag}__b{salt}_{counter}"
                         cur[tag] = new
+                elif known is None and not is_enum and tag not in file_tags:
+                    # ``typedef struct T T;`` in a block, with no T in an
+                    # enclosing scope: the use declares T in this block
+                    # (C23 6.7.3.4), and a later definition completes it.
+                    counter += 1
+                    new = f"{tag}__b{salt}_{counter}"
+                    cur[tag] = new
                 else:
                     new = known
                 if new is not None and new != tag:
