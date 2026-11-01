@@ -8,6 +8,10 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ## Unreleased
 
+### Fixed
+
+- `resolved_to_legacy` keeps `volatile` for typedef names, struct, union and enum types. A cast such as `(volatile u8 *) 0x4300` or `(volatile struct dev *) 0x4300` lost the qualifier, so a codegen dropped the device access. The test is `tests/test_volatile_legacy_types.py`.
+
 ### Added
 
 - C23 enumerations with a fixed underlying type (6.7.3.3): `enum e : unsigned char { ... };`, `enum e : T;` and the anonymous `enum : T { ... }`. The grammar has no such form, so `parse` takes the `: T` out of the text (`_strip_enum_fixed_types`) and attaches `unit._enum_fixed_types`: the tag of each such enumeration, mapped to the list of the type texts that its declarations gave (an anonymous one gets the tag `__enum_fixed_<salt>_<n>`). A host gives the enumeration and its constants that type. `enum e : 3;` in a struct body stays a bit-field.
