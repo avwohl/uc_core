@@ -49,6 +49,25 @@ def pp(src):
     ('#define NEG(x) -x\nNEG(-1) NEG(1)', '- -1 -1'),
     ('#define I(x) x++ + ++x\nI(a)', 'a++ + ++a'),
     ('#define Q(s) s\n#define P(x) Q("s" x)\nP(1)', '"s" 1'),
+    # a macro expansion and the text after it are separate tokens
+    ('#define T(t) t\nT(int)x=3;', 'int x=3;'),
+    ('#define M(a) a\nM(a)x', 'a x'),
+    ('#define ID(x) x\nint r = a ID(-)-1;', 'int r = a - -1;'),
+    ('#define E\nx = +E+ -E-1;', 'x = + + - -1;'),
+    ('#define E\nL E"x"', 'L "x"'),
+    # an object-like macro that names itself expands once
+    ('#define b (b+1)\nb', '(b+1)'),
+    ('#define var A+var\nvar', 'A+var'),
+    ('#define AA BB+1\n#define BB AA*2\nAA', 'AA*2+1'),
+    ('#define BB AA*2\n#define AA BB+1\nBB', 'BB+1*2'),
+    # white space in __VA_ARGS__ stays one space in a string
+    ('#define SV(...) #__VA_ARGS__\nSV(1, 2, 3) SV(a ,  b,c) SV()',
+     '"1, 2, 3" "a , b,c" ""'),
+    ('#define SV(...) #__VA_ARGS__\nSV(The first, second, and third items.)',
+     '"The first, second, and third items."'),
+    # __VA_OPT__ looks at the argument after its expansion
+    ('#define E\n#define O(a,...) a __VA_OPT__(X) b\nO(1,E) O(1,2) O(1)',
+     '1 b 1 X b 1 b'),
 ])
 def test_fixed(src, want):
     assert toks(pp(src)) == toks(want)

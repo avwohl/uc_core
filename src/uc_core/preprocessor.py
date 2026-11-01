@@ -1380,6 +1380,47 @@ class Preprocessor:
         # macro name verbatim.
         return text.replace("\x01", "").replace("\x02", "")
 
+    _TAIL_TOK = re.compile(r'(?:[\w.]+|[^\w\s"\'\x01\x02]{1,3})$')
+    _HEAD_TOK = re.compile(r'[\w.]+|[^\w\s"\'\x01\x02]{1,3}')
+
+    @classmethod
+    def _would_glue(cls, left: str, right: str) -> bool:
+        """True if the last token of `left` and the first token of
+        `right`, written with no space between, read as other tokens
+        (`int` `x` as `intx`, `-` `-1` as `--1`).  A macro expansion
+        and the text around it are separate tokens (C23 6.10.4.1)."""
+        if not left or not right:
+            return False
+        if left[-1] == '\x02':
+            k = left.rfind('\x01')
+            tail = left[k + 1:-1] if k >= 0 else ''
+        else:
+            m = cls._TAIL_TOK.search(left)
+            tail = m.group() if m else ''
+        if right[0] == '\x01':
+            k = right.find('\x02')
+            head = right[1:k] if k > 0 else ''
+        else:
+            m = cls._HEAD_TOK.match(right)
+            head = m.group() if m else ''
+            if not head and right[0] in '"\'':
+                return tail in ('L', 'u', 'U', 'u8')
+        if not tail or not head:
+            return False
+        n = (len(cls._pp_tokens(tail)) + len(cls._pp_tokens(head)))
+        return len(cls._pp_tokens(tail + head)) < n
+
+    def _join_expansion(self, result: list, expanded: str, rest: str) -> str:
+        """`expanded` with a space on each side where it would glue to
+        the text already in `result` or to `rest` (the text after)."""
+        left = ''.join(result[-3:])[-64:]
+        if expanded and self._would_glue(left, expanded):
+            expanded = ' ' + expanded
+        ctx = (left + expanded)[-64:]
+        if self._would_glue(ctx, rest[:64]):
+            expanded += ' '
+        return expanded
+
     def _expand_macros_once(self, text: str) -> str:
         """Single pass of macro expansion."""
         result = []
@@ -1509,7 +1550,10 @@ class Preprocessor:
                         args_match = self._parse_macro_args(text, end)
                         if args_match:
                             args, new_end = args_match
-                            expanded = self._expand_function_macro(macro, args)
+                            expanded = self._expand_function_macro(
+                                macro, args, self._raw_args)
+                            expanded = self._join_expansion(
+                                result, expanded, text[new_end:])
                             result.append(expanded)
                             i = new_end
                             continue
@@ -1522,6 +1566,11 @@ class Preprocessor:
                             body = self._paste_tokens(self._pp_tokens(body))
                         expanded = self._expand_macros(body)
                         self.expanding.discard(name)
+                        # Blue-paint the name in its own expansion, so
+                        # `#define b (b+1)` stops after one step.
+                        expanded = self._paint(expanded, name)
+                        expanded = self._join_expansion(
+                            result, expanded, text[end:])
                         result.append(expanded)
                         i = end
                         continue
@@ -1533,6 +1582,15 @@ class Preprocessor:
                 i += 1
 
         return ''.join(result)
+
+    @staticmethod
+    def _paint(text: str, name: str) -> str:
+        """Mark each mention of `name` in `text` so that the rescan
+        does not expand the mention again."""
+        if name not in text:
+            return text
+        return re.sub(rf'(?<![\w\x01]){re.escape(name)}(?![\w\x02])',
+                      f'\x01{name}\x02', text)
 
     def _parse_macro_args(self, text: str, start: int) -> Optional[tuple[list[str], int]]:
         """Parse macro arguments starting at position. Returns (args, end_pos) or None."""
@@ -1546,6 +1604,7 @@ class Preprocessor:
 
         i += 1  # Skip '('
         args = []
+        raw = []            # the same arguments, white space kept
         current_arg = []
         paren_depth = 1
 
@@ -1585,6 +1644,7 @@ class Preprocessor:
                     current_arg.append(ch)
             elif ch == ',' and paren_depth == 1:
                 args.append(''.join(current_arg).strip())
+                raw.append(''.join(current_arg))
                 current_arg = []
             elif ch in '"\'':
                 # Handle string/char literal
@@ -1614,20 +1674,27 @@ class Preprocessor:
         # Add last argument
         if current_arg or args:
             args.append(''.join(current_arg).strip())
+            raw.append(''.join(current_arg))
+        self._raw_args = raw
 
         return (args, i)
 
-    def _expand_function_macro(self, macro: Macro, args: list[str]) -> str:
-        """Expand a function-like macro with given arguments."""
+    def _expand_function_macro(self, macro: Macro, args: list[str],
+                               raw: Optional[list] = None) -> str:
+        """Expand a function-like macro with given arguments.  `raw`
+        has the same arguments with their white space: `#__VA_ARGS__`
+        keeps one space where the source had white space."""
         body = macro.body
+        raw = list(raw) if raw is not None else list(args)
 
         # Handle variadic macros
         if macro.is_variadic:
             if len(args) < len(macro.params):
                 args.extend([''] * (len(macro.params) - len(args)))
             # __VA_ARGS__ or the variadic parameter gets remaining args
-            va_args = ','.join(args[len(macro.params)-1:]) if len(args) >= len(macro.params) else ''
-            args = args[:len(macro.params)-1] + [va_args]
+            nfix = len(macro.params) - 1
+            raw = (raw + [''] * len(args))[:len(args)]
+            args = args[:nfix] + [','.join(raw[nfix:])]
 
         # Pad or truncate args to match params
         while len(args) < len(macro.params):
@@ -1659,13 +1726,7 @@ class Preprocessor:
         # Blue-paint any remaining mentions of `macro.name` in the
         # result so the outer rescan doesn't re-expand them. Skip
         # mentions already inside an existing sentinel pair (defensive).
-        if macro.name in result:
-            result = re.sub(
-                rf'\b{re.escape(macro.name)}\b',
-                f'\x01{macro.name}\x02',
-                result,
-            )
-        return result
+        return self._paint(result, macro.name)
 
     # Preprocessing tokens of a replacement list or of an argument.
     # Order matters: comments, then literals (with their encoding
@@ -1714,7 +1775,7 @@ class Preprocessor:
         toks = self._pp_tokens(macro.body)
         param_idx = {p: i for i, p in enumerate(macro.params)}
         has_va = macro.is_variadic
-        va_present = has_va and args[-1].strip() != ''
+        va_present = has_va and re.sub(r'[\x01\x02\s]', '', expanded[-1]) != ''
 
         def nonws(lst, i, step):
             i += step
