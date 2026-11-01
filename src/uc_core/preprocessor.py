@@ -595,8 +595,12 @@ class Preprocessor:
     def preprocess_file(self, filepath: str) -> str:
         """Preprocess a file."""
         filepath = os.path.abspath(filepath)
-        with open(filepath, 'r') as f:
-            source = f.read()
+        try:
+            with open(filepath, 'r') as f:
+                source = f.read()
+        except UnicodeDecodeError:
+            with open(filepath, 'r', encoding='latin-1') as f:
+                source = f.read()
 
         # Add file's directory to include paths
         file_dir = os.path.dirname(filepath)
@@ -1371,13 +1375,20 @@ class Preprocessor:
         expands).
         """
         max_iterations = 100
-        for _ in range(max_iterations):
-            new_text = self._expand_macros_once(text)
-            if new_text == text:
-                break
-            text = new_text
-        # Strip sentinels at the end so downstream consumers see the
-        # macro name verbatim.
+        self._exp_depth = getattr(self, '_exp_depth', 0) + 1
+        try:
+            for _ in range(max_iterations):
+                new_text = self._expand_macros_once(text)
+                if new_text == text:
+                    break
+                text = new_text
+        finally:
+            self._exp_depth -= 1
+        # Strip sentinels only at the outermost call.  A nested call
+        # (an argument, a body) keeps them: a painted name must stay
+        # painted when the text goes into an outer rescan.
+        if self._exp_depth:
+            return text
         return text.replace("\x01", "").replace("\x02", "")
 
     _TAIL_TOK = re.compile(r'(?:[\w.]+|[^\w\s"\'\x01\x02]{1,3})$')
@@ -1569,6 +1580,17 @@ class Preprocessor:
                         # Blue-paint the name in its own expansion, so
                         # `#define b (b+1)` stops after one step.
                         expanded = self._paint(expanded, name)
+                        tail = self._trailing_call_name(expanded, text[end:])
+                        if tail:
+                            # `g(w)` with `#define g f`: the call of f
+                            # reads its arguments from the source text.
+                            expanded = expanded[:len(expanded) - len(tail)]
+                            expanded = self._join_expansion(
+                                result, expanded, tail)
+                            result.append(expanded)
+                            text = tail + text[end:]
+                            i = 0
+                            continue
                         expanded = self._join_expansion(
                             result, expanded, text[end:])
                         result.append(expanded)
@@ -1582,6 +1604,20 @@ class Preprocessor:
                 i += 1
 
         return ''.join(result)
+
+    def _trailing_call_name(self, expanded: str, rest: str) -> str:
+        """The name of a function-like macro that ends `expanded` when
+        `rest` goes on with `(`; else an empty string."""
+        m = re.search(r'(?<![\w.\x01\x02])([A-Za-z_]\w*)$', expanded)
+        if not m:
+            return ''
+        mac = self.macros.get(m.group(1))
+        if (mac is None or mac.params is None
+                or m.group(1) in self.expanding):
+            return ''
+        if not rest.lstrip(' \t\n\r').startswith('('):
+            return ''
+        return m.group(1)
 
     @staticmethod
     def _paint(text: str, name: str) -> str:

@@ -10,6 +10,11 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
 
 ### Fixed
 
+- A self-named object-like macro that passes through the argument of a function-like macro expands once. `#define b (b+1)`, `#define f(x) x`: `f(b)` gives `(b+1)`, as before it gave `(((b+1)+1)+1)`. `#define z z[0]` with `f(z)` gives `z[0]`. The paint that marks the self-named token (blue paint) now stays on the text while an argument or a body is rescanned. The paint is taken off at the outer call only.
+- A function-like macro that an object-like macro names (`#define g f`) reads the arguments of the call from the source text. `g(w)` with `#define w 0,1` and `#define f(a) a` gives `0,1` (it gave `0`). The C99 6.10.3.5 example `g(2+(3,4)-w)` gives `f(2 * (2+(3,4)-0,1))`. The same holds when a function-like macro expands to the name of another one.
+- `Preprocessor.preprocess_file` reads a file that is not UTF-8 as Latin-1. It raised `UnicodeDecodeError`.
+- Known limits of the macro expander that stay: `f EMPTY (1)` calls `f` (a host leaves `f (1)`); a function-like macro that an object-like macro names is not called when the `(` stands on the next source line; `#__VA_OPT__(...)` and `__COUNTER__` are not supported. A `#pragma` line is not in the output text (a host `cc -E` keeps the line), because the preprocessor records the pragmas itself.
+- The tests are in `tests/test_macro_tokens.py`.
 - `resolved_to_legacy` keeps `volatile` for typedef names, struct, union and enum types. A cast such as `(volatile u8 *) 0x4300` or `(volatile struct dev *) 0x4300` lost the qualifier, so a codegen dropped the device access. The test is `tests/test_volatile_legacy_types.py`.
 
 ### Added

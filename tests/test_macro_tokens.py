@@ -157,3 +157,30 @@ def test_against_host_cc(seed, tmp_path):
         assert got == want, src
         ok += 1
     assert ok >= 25
+
+
+@pytest.mark.parametrize("src,want", [
+    # A self-named object-like macro that passes through an argument
+    # expands once (C23 6.10.5.4 example with z[0]).
+    ("#define b (b+1)\n#define f(x) x\nf(b)", "(b+1)"),
+    ("#define z z[0]\n#define f(x) x\nf(z)", "z[0]"),
+    ("#define x 2\n#define f(a) f(x * (a))\n#define z z[0]\nf(z)",
+     "f(2 * (z[0]))"),
+    # A function-like macro reached through an object-like alias reads
+    # its arguments from the source text, so a comma in the expansion
+    # of an argument stays inside the argument.
+    ("#define w 0,1\n#define f(a) a\n#define g f\ng(w)", "0,1"),
+    ("#define w 0,1\n#define f(a) a\n#define g f\ng(1-w)", "1-0,1"),
+    ("#define w 0,1\n#define f(a) a\n#define g f\nf(g(w))", "0,1"),
+    ("#define x 2\n#define w 0,1\n#define f(a) f(x * (a))\n#define g f\n"
+     "g(2+(3,4)-w)", "f(2 * (2+(3,4)-0,1))"),
+])
+def test_self_name_and_alias_call(src, want):
+    assert toks(pp(src)) == toks(want)
+
+
+def test_latin1_source_file(tmp_path):
+    from uc_core.preprocessor import preprocess_file
+    p = tmp_path / "l.c"
+    p.write_bytes(b"/* caf\xe9 */\nint a;\n")
+    assert "int a;" in preprocess_file(str(p))
