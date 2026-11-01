@@ -314,9 +314,10 @@ def resolved_to_legacy(rt):
             is_union=rt.is_union,
             members=members,
             is_packed=rt.is_packed,
+            is_volatile=rt.is_volatile,
         )
     if rt.kind == "enum":
-        return _lt.EnumType(name=rt.name)
+        return _lt.EnumType(name=rt.name, is_volatile=rt.is_volatile)
     if rt.kind == "complex":
         return _lt.ComplexType(
             base_type=rt.name or "double",
@@ -326,7 +327,9 @@ def resolved_to_legacy(rt):
     if rt.kind == "typedef":
         # Unresolved typedef-name reference. uc_core has no typedef
         # table at this level; fall back to int.
-        return _lt.BasicType(name=rt.name or "int")
+        # The volatile qualifier stays: ``(volatile u8 *)`` reads a device.
+        return _lt.BasicType(name=rt.name or "int",
+                             is_volatile=rt.is_volatile)
     if rt.kind == "typeof":
         # `typeof(expr)` type specifier — hand the operand to the
         # host codegen as a legacy TypeofType; its pre-codegen pass
