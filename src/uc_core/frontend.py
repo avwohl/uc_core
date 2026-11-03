@@ -725,6 +725,14 @@ _Alignas alignas thread_local _Thread_local __attribute__ __extension__
 """.split())
 
 
+# Words that start or follow a statement, so that two names in a row
+# (`case A`, `return X`, `else Y`) are not a typedef name and a name.
+_STMT_WORDS = frozenset("""
+case default return break continue goto if else switch while for do sizeof
+_Alignof alignof asm __asm __asm__ true false nullptr _Generic
+""".split())
+
+
 def _case_colons(toks) -> set[int]:
     """Token indexes of the colons that end `case` and `default` labels.
     A `?` inside a case expression pairs with the colon after it."""
@@ -793,9 +801,9 @@ def _fill_tail_labels(source: str) -> str:
             if nxt in _DECL_START:
                 fill = True
             elif (k + 2 < len(toks) and _KR_IDENT.fullmatch(nxt)
+                  and nxt not in _STMT_WORDS
                   and _KR_IDENT.fullmatch(toks[k + 2][0])
-                  and toks[k + 2][0] not in ("if", "else", "while", "for",
-                                             "do", "goto", "return")):
+                  and toks[k + 2][0] not in _STMT_WORDS):
                 fill = True
         if fill:
             end = toks[k][2]

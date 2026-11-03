@@ -102,3 +102,11 @@ def test_case_before_statement_is_unchanged():
     items = _body('int f(int x){ switch(x){ case 1: x = 2; } return x; }')
     case = items[0].body.items[0]
     assert not isinstance(case.stmt, ast.EmptyStmt)
+
+
+def test_text_without_a_tail_or_declaration_label_is_unchanged():
+    from uc_core.frontend import _fill_tail_labels
+    src = ("int f(int x){ switch(x){ case 1:\n case 2: return 1;\n"
+           " case 3: return x;\n default: if (x) return 2; else return 3;\n"
+           " case 4: goto L; case 5: sizeof x; L: break; } return 0; }")
+    assert _fill_tail_labels(src) == src
