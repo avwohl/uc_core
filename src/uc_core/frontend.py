@@ -713,6 +713,32 @@ def _rewrite_computed_goto(source: str) -> str:
 _TYPEOF_RE = re.compile(r"\b(?:__typeof__|__typeof|typeof|typeof_unqual)\b")
 
 
+_COLON_RBRACE_RE = re.compile(r":\s*\}")
+
+
+def _fill_tail_labels(source: str) -> str:
+    """C23 6.8.2: a label may stand last in a compound statement.  The
+    grammar wants a statement after each label, so a `:` that a `}`
+    follows directly gets a null statement: `case 1: }` becomes
+    `case 1: ; }`.  Such a colon is always a label colon (a ternary,
+    a bit-field, an asm operand list and an attribute scope need an
+    operand after the colon).  The rewrite adds no newline, so the
+    line numbers stay."""
+    if not _COLON_RBRACE_RE.search(source):
+        return source
+    toks = _kr_tokens(source)
+    out: list[str] = []
+    last = 0
+    for k in range(len(toks) - 1):
+        if toks[k][0] == ":" and toks[k + 1][0] == "}":
+            end = toks[k][2]
+            out.append(source[last:end])
+            out.append(" ;")
+            last = end
+    out.append(source[last:])
+    return "".join(out)
+
+
 def _typeof_typename_fix(src: str, tok) -> str | None:
     """Rewrite ``typeof(type-name)`` into ``typeof(*(type-name *)0)``.
 
@@ -1688,6 +1714,7 @@ def parse(
         packed_typedef_names.add(m.group(1))
     vector_names: set = set()
     pre = _strip_attributes(source, vector_names)
+    pre = _fill_tail_labels(pre)
     pre = _rename_block_scope_typedefs(pre, filename, seed_typedefs)
     pre = _rename_block_scope_tags(pre, filename)
     pre, enum_fixed = _strip_enum_fixed_types(pre, filename)

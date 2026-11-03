@@ -50,6 +50,26 @@ class PreprocessorError(Exception):
         super().__init__(f"{filename}:{line}: {message}")
 
 
+class _LazyArgs:
+    """The macro-expanded arguments of one call, each made on first use."""
+
+    def __init__(self, pp: "Preprocessor", args: list):
+        self._pp = pp
+        self._args = args
+        self._done: dict = {}
+
+    def __getitem__(self, n: int) -> str:
+        n = range(len(self._args))[n]
+        if n not in self._done:
+            arg = self._args[n]
+            pp = self._pp
+            if arg and any(m_name in arg for m_name in pp.macros
+                           if m_name not in pp.expanding):
+                arg = pp._expand_macros(arg, strip_marks=True)
+            self._done[n] = arg
+        return self._done[n]
+
+
 class Preprocessor:
     """Full C preprocessor implementation."""
 
@@ -81,6 +101,13 @@ class Preprocessor:
         # (0-based columns of the output line, ascending) where a later
         # source line begins.  A token at or after a column has that line.
         self.line_breaks: dict[int, list[tuple[int, str, int]]] = {}
+        # Value of the next __COUNTER__ (a common extension: 0, 1, 2, ...,
+        # one step at each use).
+        self._counter = 0
+        # When true, preprocess() keeps `#pragma` lines in its output and
+        # turns each `_Pragma("x")` into a `#pragma x` line: the text of
+        # a `-E` run.  Off for a compile; a pragma is then only recorded.
+        self.keep_pragmas = False
         self._included_map: Optional[list] = None
         self._included_breaks: Optional[dict] = None
 
@@ -107,6 +134,9 @@ class Preprocessor:
             body="((__SIZE_TYPE__)&((type *)0)->member)",
             is_predefined=True,
         )
+
+        # The body is a placeholder; the expander gives each use its number.
+        self.macros["__COUNTER__"] = Macro("__COUNTER__", body="0", is_predefined=True)
 
         # Date and time (fixed at preprocessing time)
         date_str = now.strftime("%b %d %Y")
@@ -324,7 +354,7 @@ class Preprocessor:
                     i += 1
                     line = line + '\n' + lines[i]
                     starts.append((len(line) - len(lines[i]), phys(i)))
-                expanded = self._expand_macros(line)
+                expanded = self._expand_line(line)
                 output_lines.append(expanded)
                 self._included_map = None
                 self._note_lines(out_map, expanded, self.current_file,
@@ -425,6 +455,41 @@ class Preprocessor:
                 if base + k in out_breaks:
                     out_breaks[base + k].sort()
 
+    _PRAGMA_OP = re.compile(
+        r"""("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')"""
+        r"""|\b_Pragma\s*\(\s*(?:u8|u|U|L)?"((?:\\.|[^"\\\n])*)"\s*\)""")
+
+    def _expand_line(self, line: str) -> str:
+        """Expand the macros of one logical line.  With `keep_pragmas`
+        each `_Pragma("x")` operator becomes a `#pragma x` line (C23
+        6.10.10: the string is un-escaped: `\\"` to `"`, `\\\\` to `\\`)."""
+        expanded = self._expand_macros(line)
+        if not self.keep_pragmas or '_Pragma' not in expanded:
+            return expanded
+
+        def op(m):
+            if m.group(2) is None:
+                return m.group(0)
+            text = re.sub(r'\\(["\\])', r'\1', m.group(2))
+            return '\n#pragma ' + text + '\n'
+        return self._PRAGMA_OP.sub(op, expanded)
+
+    def _calls_function_macro(self, name: str) -> bool:
+        """True if `name` is a function-like macro, or an object-like macro
+        whose replacement list ends with the name of one (`#define obj f`:
+        `obj` and a `(` on the next line make a call of f)."""
+        for _ in range(16):
+            mac = self.macros.get(name)
+            if mac is None:
+                return False
+            if mac.params is not None:
+                return True
+            toks = [t for t in self._pp_tokens(mac.body) if t[0] != 'ws']
+            if not toks or toks[-1][0] != 'id' or toks[-1][1] == name:
+                return False
+            name = toks[-1][1]
+        return False
+
     def _has_unclosed_macro_call(self, text: str,
                                  next_line: "str | None" = None) -> bool:
         """Check if text contains a function-like macro name followed by unclosed parens.
@@ -459,7 +524,7 @@ class Preprocessor:
         import re
         for m in re.finditer(r'[a-zA-Z_]\w*', text):
             name = m.group()
-            if name in self.macros and self.macros[name].params is not None:
+            if self._calls_function_macro(name):
                 # Found a function-like macro - check if parens are unclosed
                 pos = m.end()
                 # Skip whitespace. NEWLINES COUNT: once the caller has merged a
@@ -573,7 +638,7 @@ class Preprocessor:
                     i += 1
                     line = line + '\n' + lines[i]
                     starts.append((len(line) - len(lines[i]), phys(i)))
-                expanded = self._expand_macros(line)
+                expanded = self._expand_line(line)
                 output_lines.append(expanded)
                 self._included_map = None
                 self._note_lines(out_map, expanded, self.current_file,
@@ -653,7 +718,15 @@ class Preprocessor:
             print(f"{self.current_file}:{self.current_line}: warning: {args}", file=sys.stderr)
             return None
         elif name == 'pragma':
-            return self._process_pragma(args)
+            self._process_pragma(args)
+            # -E output: a host `cc -E` keeps the line.  The compiler
+            # needs no such line, so the text stays as it was unless the
+            # host asks (`keep_pragmas`).
+            # (clang consumes `once`, `push_macro` and `pop_macro`.)
+            if (self.keep_pragmas and not re.match(
+                    r'(once\b|(push|pop)_macro\b)', args.strip())):
+                return '#pragma ' + args.strip()
+            return None
         elif name == 'line':
             # Expand macros in #line args (e.g., #line MACRO -> #line value)
             expanded_args = self._expand_macros(args)
@@ -1083,6 +1156,10 @@ class Preprocessor:
             _char_to_int, expr,
         )
 
+        # C23 6.10.2: `true` is 1 in a #if expression (`false` is 0, as
+        # is every other name).
+        expr = re.sub(r'\btrue\b', '1', expr)
+
         # Replace remaining identifiers with 0 (undefined macros)
         # First handle function-like calls on undefined macros: IDENT(...) -> 0
         # This prevents "0(args)" which Python can't evaluate
@@ -1362,8 +1439,20 @@ class Preprocessor:
         )
         return expr
 
-    def _expand_macros(self, text: str) -> str:
+    # A function-like macro name that the scan met with another token after
+    # it (not `(`) is not a call (C23 6.10.5.1: the next preprocessing token
+    # must be `(`).  `f EMPTY (1)` stays `f (1)` although EMPTY expands to
+    # nothing.  The mention is marked `\x01\x03f\x02`, so that the next
+    # pass over the text leaves the mention alone.  The mark is a blue-paint
+    # sentinel with a \x03 in front of the name.
+    _SKIP_MARK = re.compile('\x01\x03([^\x02]*)\x02')
+
+    def _expand_macros(self, text: str, strip_marks: bool = False) -> str:
         """Expand all macros in text.
+
+        `strip_marks` (an argument that is expanded before it goes into a
+        body) takes the skip marks off at the end: the rescan of the body
+        decides again, with the text after the call in view.
 
         Multi-pass with blue-painting: each expansion of a function-
         like macro X marks any X mentions in its result with sentinel
@@ -1388,11 +1477,14 @@ class Preprocessor:
         # (an argument, a body) keeps them: a painted name must stay
         # painted when the text goes into an outer rescan.
         if self._exp_depth:
+            if strip_marks:
+                text = self._SKIP_MARK.sub(r'\1', text)
             return text
-        return text.replace("\x01", "").replace("\x02", "")
+        return (text.replace("\x01", "").replace("\x02", "")
+                .replace("\x03", ""))
 
-    _TAIL_TOK = re.compile(r'(?:[\w.]+|[^\w\s"\'\x01\x02]{1,3})$')
-    _HEAD_TOK = re.compile(r'[\w.]+|[^\w\s"\'\x01\x02]{1,3}')
+    _TAIL_TOK = re.compile(r'(?:[\w.]+|[^\w\s"\'\x01\x02\x03]{1,3})$')
+    _HEAD_TOK = re.compile(r'[\w.]+|[^\w\s"\'\x01\x02\x03]{1,3}')
 
     @classmethod
     def _would_glue(cls, left: str, right: str) -> bool:
@@ -1404,13 +1496,13 @@ class Preprocessor:
             return False
         if left[-1] == '\x02':
             k = left.rfind('\x01')
-            tail = left[k + 1:-1] if k >= 0 else ''
+            tail = left[k + 1:-1].lstrip('\x03') if k >= 0 else ''
         else:
             m = cls._TAIL_TOK.search(left)
             tail = m.group() if m else ''
         if right[0] == '\x01':
             k = right.find('\x02')
-            head = right[1:k] if k > 0 else ''
+            head = right[1:k].lstrip('\x03') if k > 0 else ''
         else:
             m = cls._HEAD_TOK.match(right)
             head = m.group() if m else ''
@@ -1563,16 +1655,31 @@ class Preprocessor:
                             args, new_end = args_match
                             expanded = self._expand_function_macro(
                                 macro, args, self._raw_args)
+                            expanded = self._mark_trailing(
+                                expanded, text[new_end:])
                             expanded = self._join_expansion(
                                 result, expanded, text[new_end:])
                             result.append(expanded)
                             i = new_end
                             continue
-                        # No arguments - don't expand
+                        # No arguments - don't expand.  A token that is not
+                        # `(` follows: the name is not a call, whatever the
+                        # next pass makes of the text after it.
+                        k = end
+                        while k < len(text) and text[k] in ' \t\n\r':
+                            k += 1
+                        if (k < len(text) and text[k] != '('
+                                and not text.startswith(('/*', '//'), k)):
+                            result.append(f'\x01\x03{name}\x02')
+                            i = end
+                            continue
                     else:
                         # Object-like macro
                         self.expanding.add(name)
                         body = macro.body
+                        if name == '__COUNTER__' and macro.is_predefined:
+                            body = str(self._counter)
+                            self._counter += 1
                         if '##' in body:
                             body = self._paste_tokens(self._pp_tokens(body))
                         expanded = self._expand_macros(body)
@@ -1591,6 +1698,7 @@ class Preprocessor:
                             text = tail + text[end:]
                             i = 0
                             continue
+                        expanded = self._mark_trailing(expanded, text[end:])
                         expanded = self._join_expansion(
                             result, expanded, text[end:])
                         result.append(expanded)
@@ -1605,10 +1713,25 @@ class Preprocessor:
 
         return ''.join(result)
 
+    def _mark_trailing(self, expanded: str, rest: str) -> str:
+        """`expanded` ends with the name of a function-like macro and a
+        token that is not `(` follows in `rest`: the name is not a call
+        (`obj EMPTY (4)` with `#define obj g`).  Mark the name."""
+        m = re.search(r'(?<![\w.\x01\x02\x03])([A-Za-z_]\w*)$', expanded)
+        if not m:
+            return expanded
+        mac = self.macros.get(m.group(1))
+        if mac is None or mac.params is None or m.group(1) in self.expanding:
+            return expanded
+        r = rest.lstrip(' \t\n\r')
+        if not r or r[0] == '(' or r.startswith(('/*', '//')):
+            return expanded
+        return expanded[:m.start()] + f'\x01\x03{m.group(1)}\x02'
+
     def _trailing_call_name(self, expanded: str, rest: str) -> str:
         """The name of a function-like macro that ends `expanded` when
         `rest` goes on with `(`; else an empty string."""
-        m = re.search(r'(?<![\w.\x01\x02])([A-Za-z_]\w*)$', expanded)
+        m = re.search(r'(?<![\w.\x01\x02\x03])([A-Za-z_]\w*)$', expanded)
         if not m:
             return ''
         mac = self.macros.get(m.group(1))
@@ -1625,7 +1748,7 @@ class Preprocessor:
         does not expand the mention again."""
         if name not in text:
             return text
-        return re.sub(rf'(?<![\w\x01]){re.escape(name)}(?![\w\x02])',
+        return re.sub(rf'(?<![\w\x01\x03]){re.escape(name)}(?![\w\x02])',
                       f'\x01{name}\x02', text)
 
     def _parse_macro_args(self, text: str, start: int) -> Optional[tuple[list[str], int]]:
@@ -1739,14 +1862,9 @@ class Preprocessor:
         # For non-#/## uses, parameter values are macro-expanded before
         # substitution into the body (C23 6.10.5.2).  A parameter next to
         # `##` and the operand of `#` use the unexpanded argument.
-        expanded_args = []
-        for arg in args:
-            if arg and any(
-                m_name in arg for m_name in self.macros if m_name not in self.expanding
-            ):
-                expanded_args.append(self._expand_macros(arg))
-            else:
-                expanded_args.append(arg)
+        # An argument is expanded when the body asks for its value, so an
+        # argument that only `#` or `##` use does not step __COUNTER__.
+        expanded_args = _LazyArgs(self, args)
         # The replacement list is a list of preprocessing tokens.  A
         # parameter is replaced only where the token is an identifier
         # (C23 6.10.5): the text of a string literal or of a character
@@ -1799,7 +1917,7 @@ class Preprocessor:
         White space between tokens becomes one space; only a `\\` or
         `"` inside a string literal or character constant is escaped."""
         parts = []
-        for kind, txt in cls._pp_tokens(arg.replace('\x01', '').replace('\x02', '')):
+        for kind, txt in cls._pp_tokens(arg.replace('\x01', '').replace('\x02', '').replace('\x03', '')):
             if kind == 'lit':
                 txt = txt.replace('\\', '\\\\').replace('"', '\\"')
             parts.append(txt)
@@ -1811,7 +1929,7 @@ class Preprocessor:
         toks = self._pp_tokens(macro.body)
         param_idx = {p: i for i, p in enumerate(macro.params)}
         has_va = macro.is_variadic
-        va_present = has_va and re.sub(r'[\x01\x02\s]', '', expanded[-1]) != ''
+        va_present = has_va and re.sub(r'[\x01\x02\x03\s]', '', expanded[-1]) != ''
 
         def nonws(lst, i, step):
             i += step
@@ -1819,13 +1937,43 @@ class Preprocessor:
                 i += step
             return i
 
-        def subst(lst):
+        def va_opt_end(lst, j):
+            """Index of the `)` that closes the `(` at lst[j], or -1."""
+            depth = 0
+            for k in range(j, len(lst)):
+                if lst[k] == ('other', '('):
+                    depth += 1
+                elif lst[k] == ('other', ')'):
+                    depth -= 1
+                    if depth == 0:
+                        return k
+            return -1
+
+        def subst(lst, raw=False):
             out = []
             i = 0
             while i < len(lst):
                 kind, txt = lst[i]
                 if kind == 'other' and txt == '#':
                     j = nonws(lst, i, 1)
+                    # C23 6.10.5.2: `#__VA_OPT__(...)` spells the
+                    # replacement of __VA_OPT__ as a string literal.  Its
+                    # parameters stand for their arguments as written.
+                    if (has_va and j < len(lst)
+                            and lst[j] == ('id', '__VA_OPT__')):
+                        j2 = nonws(lst, j, 1)
+                        k = (va_opt_end(lst, j2)
+                             if j2 < len(lst) and lst[j2] == ('other', '(')
+                             else -1)
+                        if k >= 0:
+                            if va_present:
+                                inner = self._paste_tokens(
+                                    subst(lst[j2 + 1:k], raw=True))
+                                out.append(('lit', self._stringify(inner)))
+                            else:
+                                out.append(('lit', '""'))
+                            i = k + 1
+                            continue
                     if j < len(lst) and lst[j][0] == 'id' and lst[j][1] in param_idx:
                         out.append(('lit', self._stringify(args[param_idx[lst[j][1]]])))
                         i = j + 1
@@ -1845,7 +1993,7 @@ class Preprocessor:
                             k += 1
                         if k < len(lst):
                             if va_present:
-                                out.extend(subst(lst[j + 1:k]))
+                                out.extend(subst(lst[j + 1:k], raw))
                             else:
                                 out.append(('pm', ''))
                             i = k + 1
@@ -1856,7 +2004,7 @@ class Preprocessor:
                     q = nonws(lst, i, 1)
                     near_paste = ((p >= 0 and lst[p][0] == 'paste')
                                   or (q < len(lst) and lst[q][0] == 'paste'))
-                    if near_paste:
+                    if near_paste or raw:
                         rt = self._pp_tokens(args[n])
                         # trim edge white space of the operand
                         while rt and rt[0][0] == 'ws':
