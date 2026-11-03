@@ -350,7 +350,8 @@ class Preprocessor:
                 # Join subsequent lines if a function-like macro invocation
                 # has unclosed parentheses spanning multiple lines
                 while (i + 1 < len(lines)
-                       and self._has_unclosed_macro_call(line, lines[i + 1])):
+                       and self._has_unclosed_macro_call(
+                           line, self._next_code_line(lines, i))):
                     i += 1
                     line = line + '\n' + lines[i]
                     starts.append((len(line) - len(lines[i]), phys(i)))
@@ -471,6 +472,8 @@ class Preprocessor:
             if m.group(2) is None:
                 return m.group(0)
             text = re.sub(r'\\(["\\])', r'\1', m.group(2))
+            if re.match(r'(once\b|(push|pop)_macro\b)', text.strip()):
+                return ''       # the host consumes these
             return '\n#pragma ' + text + '\n'
         return self._PRAGMA_OP.sub(op, expanded)
 
@@ -489,6 +492,16 @@ class Preprocessor:
                 return False
             name = toks[-1][1]
         return False
+
+    @staticmethod
+    def _next_code_line(lines: list, i: int) -> "str | None":
+        """The first line after lines[i] that is not blank (comments are
+        already gone).  A function-like macro name at the end of a line
+        takes its `(` from there, over blank and comment-only lines."""
+        for k in range(i + 1, len(lines)):
+            if lines[k].strip():
+                return lines[k]
+        return None
 
     def _has_unclosed_macro_call(self, text: str,
                                  next_line: "str | None" = None) -> bool:
@@ -576,6 +589,13 @@ class Preprocessor:
                         j += 1
                     if depth > 0:
                         return True
+                    # The call is closed and ends the line.  Its result
+                    # may end with a function-like macro name (`ID(f)`),
+                    # which takes a `(` from the next code line.
+                    if (next_line is not None and j < len(text)
+                            and not text[j + 1:].strip()
+                            and next_line.lstrip().startswith('(')):
+                        return True
         return False
 
     def _preprocess_included(self, source: str, filename: str, parent_stack_depth: int) -> str:
@@ -634,7 +654,8 @@ class Preprocessor:
                 # runs. The top-level preprocess() loop does this; the
                 # included-file path was missing the same merge.
                 while (i + 1 < len(lines)
-                       and self._has_unclosed_macro_call(line, lines[i + 1])):
+                       and self._has_unclosed_macro_call(
+                           line, self._next_code_line(lines, i))):
                     i += 1
                     line = line + '\n' + lines[i]
                     starts.append((len(line) - len(lines[i]), phys(i)))
@@ -1007,7 +1028,8 @@ class Preprocessor:
         if not name or not re.match(r'^\w+$', name):
             raise PreprocessorError(f"Invalid macro name: {name}",
                                    self.current_file, self.current_line)
-        if name in self.macros and not self.macros[name].is_predefined:
+        if name in self.macros and (not self.macros[name].is_predefined
+                                    or name == '__COUNTER__'):
             del self.macros[name]
         return None
 
@@ -1717,7 +1739,8 @@ class Preprocessor:
         """`expanded` ends with the name of a function-like macro and a
         token that is not `(` follows in `rest`: the name is not a call
         (`obj EMPTY (4)` with `#define obj g`).  Mark the name."""
-        m = re.search(r'(?<![\w.\x01\x02\x03])([A-Za-z_]\w*)$', expanded)
+        m = re.search(r'(?<![\w.\x01\x02\x03])([A-Za-z_]\w*)([ \t\n\r]*)$',
+                      expanded)
         if not m:
             return expanded
         mac = self.macros.get(m.group(1))
@@ -1726,7 +1749,8 @@ class Preprocessor:
         r = rest.lstrip(' \t\n\r')
         if not r or r[0] == '(' or r.startswith(('/*', '//')):
             return expanded
-        return expanded[:m.start()] + f'\x01\x03{m.group(1)}\x02'
+        return (expanded[:m.start()] + f'\x01\x03{m.group(1)}\x02'
+                + m.group(2))
 
     def _trailing_call_name(self, expanded: str, rest: str) -> str:
         """The name of a function-like macro that ends `expanded` when
@@ -1958,7 +1982,9 @@ class Preprocessor:
                     j = nonws(lst, i, 1)
                     # C23 6.10.5.2: `#__VA_OPT__(...)` spells the
                     # replacement of __VA_OPT__ as a string literal.  Its
-                    # parameters stand for their arguments as written.
+                    # parameters are replaced as in any replacement list
+                    # (an argument is macro-expanded unless `##` is
+                    # next to it); the other names are not expanded.
                     if (has_va and j < len(lst)
                             and lst[j] == ('id', '__VA_OPT__')):
                         j2 = nonws(lst, j, 1)
@@ -1968,7 +1994,7 @@ class Preprocessor:
                         if k >= 0:
                             if va_present:
                                 inner = self._paste_tokens(
-                                    subst(lst[j2 + 1:k], raw=True))
+                                    subst(lst[j2 + 1:k], raw))
                                 out.append(('lit', self._stringify(inner)))
                             else:
                                 out.append(('lit', '""'))

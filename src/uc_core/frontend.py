@@ -716,21 +716,88 @@ _TYPEOF_RE = re.compile(r"\b(?:__typeof__|__typeof|typeof|typeof_unqual)\b")
 _COLON_RBRACE_RE = re.compile(r":\s*\}")
 
 
+_DECL_START = frozenset("""
+int char short long signed unsigned float double void _Bool bool _Complex
+_Decimal32 _Decimal64 _Decimal128 _BitInt struct union enum const volatile
+restrict static extern register auto typedef inline _Noreturn constexpr
+static_assert _Static_assert _Atomic typeof typeof_unqual __typeof__
+_Alignas alignas thread_local _Thread_local __attribute__ __extension__
+""".split())
+
+
+def _case_colons(toks) -> set[int]:
+    """Token indexes of the colons that end `case` and `default` labels.
+    A `?` inside a case expression pairs with the colon after it."""
+    found: set[int] = set()
+    k = 0
+    n = len(toks)
+    while k < n:
+        t = toks[k][0]
+        if t == "default" and k + 1 < n and toks[k + 1][0] == ":":
+            found.add(k + 1)
+        elif t == "case":
+            depth = 0
+            quest = 0
+            j = k + 1
+            while j < n:
+                u = toks[j][0]
+                if u in "([{":
+                    depth += 1
+                elif u in ")]}":
+                    depth -= 1
+                    if depth < 0:
+                        break
+                elif u == "?" and depth == 0:
+                    quest += 1
+                elif u == ":" and depth == 0:
+                    if quest == 0:
+                        found.add(j)
+                        break
+                    quest -= 1
+                elif u == ";":
+                    break
+                j += 1
+        k += 1
+    return found
+
+
 def _fill_tail_labels(source: str) -> str:
-    """C23 6.8.2: a label may stand last in a compound statement.  The
-    grammar wants a statement after each label, so a `:` that a `}`
-    follows directly gets a null statement: `case 1: }` becomes
-    `case 1: ; }`.  Such a colon is always a label colon (a ternary,
-    a bit-field, an asm operand list and an attribute scope need an
-    operand after the colon).  The rewrite adds no newline, so the
-    line numbers stay."""
-    if not _COLON_RBRACE_RE.search(source):
+    """C23 6.8.2: a label may stand last in a compound statement, and a
+    label may stand before a declaration.  The grammar wants a statement
+    after each label, so a null statement is added after the colon of
+    - a label that a `}` follows directly: `case 1: }` becomes
+      `case 1: ; }`.  Such a colon is always a label colon (a ternary,
+      a bit-field, an asm operand list and an attribute scope need an
+      operand after the colon);
+    - a label that `static_assert` follows;
+    - a `case` or `default` label that a declaration follows.  The
+      declaration starts with a keyword, or with a typedef name followed
+      by a name (`case 1: T y;`).  A typedef name followed by `*` is not
+      found, because `T *y` also reads as a product.
+    The rewrite adds no newline, so the line numbers stay."""
+    if not (_COLON_RBRACE_RE.search(source) or ":" in source):
+        return source
+    if not re.search(r"\b(?:case|default|static_assert|_Static_assert)\b|:\s*\}",
+                     source):
         return source
     toks = _kr_tokens(source)
+    cc = _case_colons(toks)
     out: list[str] = []
     last = 0
     for k in range(len(toks) - 1):
-        if toks[k][0] == ":" and toks[k + 1][0] == "}":
+        if toks[k][0] != ":":
+            continue
+        nxt = toks[k + 1][0]
+        fill = nxt == "}" or nxt in ("static_assert", "_Static_assert")
+        if not fill and k in cc:
+            if nxt in _DECL_START:
+                fill = True
+            elif (k + 2 < len(toks) and _KR_IDENT.fullmatch(nxt)
+                  and _KR_IDENT.fullmatch(toks[k + 2][0])
+                  and toks[k + 2][0] not in ("if", "else", "while", "for",
+                                             "do", "goto", "return")):
+                fill = True
+        if fill:
             end = toks[k][2]
             out.append(source[last:end])
             out.append(" ;")

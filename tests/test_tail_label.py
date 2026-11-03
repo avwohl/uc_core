@@ -71,3 +71,34 @@ def test_line_numbers_stay():
 def test_a_label_with_a_statement_still_parses():
     items = _body('int f(int x){ L: x++; if (x < 3) goto L; return x; }')
     assert isinstance(items[0].stmt, ast.ExpressionStmt)
+
+
+def _parses(src):
+    parse(src, "t.c")
+
+
+def test_case_label_before_declaration():
+    _parses('void f(int x){ switch(x){ case 1: int y=2; (void)y; } }')
+
+
+def test_default_label_before_declaration():
+    _parses('void f(int x){ switch(x){ default: static int y=2; (void)y; } }')
+
+
+def test_case_with_ternary_before_declaration():
+    _parses('void f(int x){ switch(x){ case 1 ? 2 : 3: long y=2; (void)y; } }')
+
+
+def test_case_label_before_typedef_name_declaration():
+    _parses('typedef int T; void f(int x){ switch(x){ case 1: T y=2; (void)y; } }')
+
+
+def test_label_before_static_assert():
+    _parses('void f(void){ L: static_assert(1, "a"); }')
+    _parses('void f(int x){ switch(x){ case 1: static_assert(1, "a"); } }')
+
+
+def test_case_before_statement_is_unchanged():
+    items = _body('int f(int x){ switch(x){ case 1: x = 2; } return x; }')
+    case = items[0].body.items[0]
+    assert not isinstance(case.stmt, ast.EmptyStmt)

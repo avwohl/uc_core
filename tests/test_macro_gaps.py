@@ -61,6 +61,23 @@ CASES = [
      '"__COUNTER__" 0 n__COUNTER__ 1 1'),
     ("#define NEXT __COUNTER__\nNEXT NEXT\n#ifdef __COUNTER__\nyes\n#endif",
      "0 1 yes"),
+    # a blank line or a comment line before the "("
+    ("#define f(x) <x>\nf\n\n(1)", "<1>"),
+    ("#define f(x) <x>\nf\n// c\n/* a\nb */\n(1)", "<1>"),
+    ("#define f(x) <x>\n#define obj f\nobj\n\n(2)", "<2>"),
+    ("#define f(x) <x>\nf\n\n#define Z 1\n(3)", "f (3)"),
+    # a name that a function-like macro produced, then empty macros
+    ("#define EMPTY\n#define ID(x) x\n#define f(x) <x>\n"
+     "ID(f EMPTY) EMPTY EMPTY () (1)", "f ( ) ( 1 )"),
+    ("#define EMPTY\n#define ID(x) x\n#define f(x) <x>\n"
+     "EMPTY ID(f EMPTY) EMPTY EMPTY EMPTY (1)", "f ( 1 )"),
+    ("#define EMPTY\n#define ID(x) x\n#define f(x) <x>\nID(f)\n()", "< >"),
+    ("#define EMPTY\n#define ID(x) x\n#define f(x) <x>\nID(f EMPTY)\n(1)",
+     "<1>"),
+    # #__VA_OPT__ with an argument that names a macro
+    ("#define X 5\n#define EMPTY\n#define S(a, ...) #__VA_OPT__(a X __VA_ARGS__)\n"
+     "S(EMPTY, X)", '"X 5"'),
+    ("#undef __COUNTER__\n__COUNTER__", "__COUNTER__"),
 ]
 
 
@@ -180,3 +197,10 @@ def test_true_is_one_in_an_if_expression():
     assert toks(preprocess(src, "t.c")) == ["A"]
     src2 = "#define true 0\n#if true\nA\n#else\nB\n#endif\n"
     assert toks(preprocess(src2, "t.c")) == ["B"]
+
+
+def test_pragma_operator_once_and_push_macro_leave_e_text():
+    src = ('_Pragma("once") _Pragma("push_macro(\\"X\\")") '
+           '_Pragma("pop_macro(\\"X\\")") _Pragma("omp parallel") int a;\n')
+    got = [ln.strip() for ln in _e_text(src, True).split("\n") if ln.strip()]
+    assert got == ["#pragma omp parallel", "int a;"]
