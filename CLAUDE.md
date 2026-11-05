@@ -51,11 +51,12 @@ is a miscompile.
 uc386's suite executes compiled i386 via unicorn — the strongest
 semantic oracle. Run all three after any change that affects codegen:
 
-- `cd /Users/wohl/src/uc_core && python3.14 -m pytest -q`            (≈145 passed)
+- `cd /Users/wohl/src/uc_core && python3.14 -m pytest -q`            (545 passed, 1 skipped on 2026-11-04)
 - `cd /Users/wohl/src/uc386 && .venv/bin/pytest tests/ -q`           (498 passed, 1 skipped on 2026-11-04)
   The venv needs `unicorn`: without it the 31 tests that run the i386 code skip
   and the suite still exits 0. The 1 skip needs a built `micropython.bin`.
-- `cd /Users/wohl/src/uc80  && python3.14 -m pytest tests/ -q`       (≈136 passed)
+- `cd /Users/wohl/src/uc80  && python3.14 -m pytest tests/ -q`       (4438 passed, 2 skipped on 2026-11-04)
+  The uc80 suite takes about 11 minutes with `-n 8` (pytest-xdist).
 
 ## Toolchain
 
