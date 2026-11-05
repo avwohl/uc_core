@@ -6,7 +6,7 @@ All notable changes to uc_core land here. Format follows
 surface (the `uc_core` Python API, the AST node shapes re-exported from
 `uc_core.ast`, and the preprocessor).
 
-## Unreleased
+## 0.4.2 — 2026-11-04
 
 ### Fixed
 
@@ -129,9 +129,7 @@ surface (the `uc_core` Python API, the AST node shapes re-exported from
   a back end can refuse the fold without its own walk of the operands. The
   walk of the operands now sits in one place with the sequence-point rules.
 
-## 0.4.2
-
-### Fixed
+### Fixed (in the tree as 0.4.2 since 2026-10-24, not published then)
 
 - **A label may precede an `asm(...)` statement.** `L: asm("nop");` was a
   parse error: the grammar (`c23.uplox` in uplox) took a label only before
