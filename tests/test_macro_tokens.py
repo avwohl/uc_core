@@ -179,6 +179,51 @@ def test_self_name_and_alias_call(src, want):
     assert toks(pp(src)) == toks(want)
 
 
+# Boost.Preprocessor BOOST_PP_NOT_EQUAL: the body of NE_2 names NE_2, so that
+# mention is painted; CAT then pastes `CHK_` onto the painted name to make
+# the name of ANOTHER macro and calls it.
+_NOT_EQUAL = (
+    "#define CAT(a, b) CAT_I(a, b)\n"
+    "#define CAT_I(a, b) a ## b\n"
+    "#define IIF(c, t, f) CAT(IIF_, c)(t, f)\n"
+    "#define IIF_0(t, f) f\n"
+    "#define IIF_1(t, f) t\n"
+    "#define NE(x, y) CAT(CHK_, NE_ ## x(0, NE_ ## y))\n"
+    "#define CHK_NIL 1\n"
+    "#define CHK_NE_1(c, y) 0\n"
+    "#define CHK_NE_2(c, y) 0\n"
+    "#define NE_1(c, y) IIF(c, NIL, y(1, NIL))\n"
+    "#define NE_2(c, y) IIF(c, NIL, y(1, NIL))\n")
+
+
+@pytest.mark.parametrize("src,want", [
+    # The result of `##` is a new token, open to macro replacement
+    # (C23 6.10.5.3p3): the paint on an operand does not pass to it.
+    ("#define f(x) x\n#define b CAT(P_, b) + 1\n"
+     "#define CAT(a, b) a ## b\n#define P_b 7\nf(b)", "7 + 1"),
+    (_NOT_EQUAL + "NE(2, 2)", "0"),
+    (_NOT_EQUAL + "NE(1, 2)", "1"),
+    (_NOT_EQUAL + "NE(2, 1)", "1"),
+    (_NOT_EQUAL + "IIF(NE(2, 2), yes, no)", "no"),
+    (_NOT_EQUAL + "IIF(NE(1, 2), yes, no)", "yes"),
+])
+def test_paste_result_is_not_painted(src, want):
+    assert toks(pp(src)) == toks(want)
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="no host cc")
+@pytest.mark.parametrize("call", [
+    "NE(2, 2)", "NE(1, 2)", "NE(2, 1)", "NE(1, 1)",
+    "IIF(NE(2, 2), yes, no)", "IIF(NE(1, 2), yes, no)"])
+def test_paste_result_against_host_cc(call, tmp_path):
+    f = tmp_path / "t.c"
+    f.write_text(_NOT_EQUAL + call + "\n")
+    r = subprocess.run(["cc", "-E", "-P", "-std=c2x", "-x", "c", str(f)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0
+    assert toks(pp(_NOT_EQUAL + call)) == toks(r.stdout.strip())
+
+
 def test_latin1_source_file(tmp_path):
     from uc_core.preprocessor import preprocess_file
     p = tmp_path / "l.c"

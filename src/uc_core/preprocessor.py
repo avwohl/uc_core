@@ -2081,6 +2081,16 @@ class Preprocessor:
                 elif rt[0] == 'pm':
                     new = lt
                 else:
+                    # The result of `##` is a NEW token, open to further
+                    # macro replacement (C23 6.10.5.3p3).  The paint on
+                    # an operand belongs to that operand and does not
+                    # pass to the result: Boost.Preprocessor pastes
+                    # `CHECK_` onto a painted macro name to make the name
+                    # of another macro, and calls that macro.
+                    if lt[0] == 'sent':
+                        lt = ('id', lt[1].strip('\x01\x02\x03'))
+                    if rt[0] == 'sent':
+                        rt = ('id', rt[1].strip('\x01\x02\x03'))
                     new = ('id' if lt[0] in ('id', 'num') else 'other',
                            lt[1] + rt[1])
                 out[l:r + 1] = [new]

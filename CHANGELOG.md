@@ -6,6 +6,12 @@ All notable changes to uc_core land here. Format follows
 surface (the `uc_core` Python API, the AST node shapes re-exported from
 `uc_core.ast`, and the preprocessor).
 
+## Unreleased
+
+### Fixed
+
+- The result of the `##` operator is a new token, and the rescan can expand it (C23 6.10.5.3). A macro name that had the "do not expand again" mark kept the mark when `##` joined the name to a different token. The new name then did not expand. This fault came with 0.4.2. Boost.Preprocessor shows the fault: `BOOST_PP_NOT_EQUAL(2, 2)` gave `BOOST_PP_NOT_EQUAL_CHECK_BOOST_PP_NOT_EQUAL_2 (1, BOOST_PP_NIL)`. It gives `0`. The tests are in `tests/test_macro_tokens.py`.
+
 ## 0.4.2 — 2026-11-04
 
 ### Fixed
